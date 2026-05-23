@@ -18,3 +18,54 @@
  *  - fragile and robust banks,
  *  - core and peripheral banks.
 */
+
+#include <vector>
+#include <random>
+#include <algorithm>
+#include <iostream>
+
+enum Type{
+    STRONG,
+    FRAGILE
+};
+
+struct Bank{
+    int id;
+
+    double external_assets;
+    double liquidity;
+    double interbank_assets;
+
+    double external_liabilities;
+    double interbank_liabilities;
+
+    double extra_liquidity;
+    double founding_need;
+
+    bool defaulted;
+    Type type;
+};
+
+double total_assets(const Bank& bank){
+    
+}
+
+double total_liabilities(const Bank& bank){
+
+}
+
+double capital(const Bank& bank){
+
+}
+
+bool should_default(const Bank& bank){
+
+}
+
+std::vector<Bank> initialize_banks(int nr_banks, double ratio_fragile){
+
+}
+
+int defaulted_banks(const std::vector<Bank>& banks){
+    
+}

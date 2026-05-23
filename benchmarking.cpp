@@ -17,3 +17,8 @@
  *  - speedup obtained from parallelization.
  *
  */
+
+#include "banks.cpp"
+#include "market.cpp"
+#include "shock.cpp"
+#include "contagion.cpp"

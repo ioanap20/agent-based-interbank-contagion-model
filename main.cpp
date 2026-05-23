@@ -12,3 +12,9 @@
  *  6. collect and display the final results.
  *
  */
+
+#include "banks.cpp"
+#include "market.cpp"
+#include "shock.cpp"
+#include "contagion.cpp"
+

@@ -18,3 +18,13 @@
  *  - building the interbank network through which contagion can later spread.
  *
  */
+
+ #include <vector>
+ #include <algorithm>
+
+ struct Loan{
+    int lender;
+    int borrower;
+    double amount;
+ };
+
