@@ -19,3 +19,87 @@
  *  - shocking a core bank,
  *  - shocking several banks simultaneously.
  */
+
+ #include "shock.hpp"
+ #include <algorithm>
+ #include <random>
+
+ void apply_asset_shock(std::vector<Bank>& banks, double shock_percentage) {
+    //check percentage is within the correct range
+    if (shock_pecentage < 0.0 || shock_pecentage > 1.0) return;
+
+    //apply shock
+    for (auto& bank : banks) {
+        if (!bank.defaulted) {
+            //apply uniform haircut
+            double loss = bank.balanceSheet.assets * shock_percentage;
+            bank.balanceSheet.assets -= loss;
+
+            //recalculate equity and update default status
+            update_equity(bank);
+            if (is_insolvent(bank)) {
+                bank.defaulted = true;
+            }
+        }
+    }
+ }
+
+ void apply_shock_to_large_banks(std::vector<Bank>& banks, double shock_percentage) {
+    //check percentage is within the correct range
+    if (shock_pecentage < 0.0 || shock_pecentage > 1.0) return;
+
+    //apply shock
+    for (auto& bank : banks) {
+        if (!bank.defaulted) {
+            //target=large for systemic core risk test
+            if (bank.type == BankType::Large && |bank.defaulted) {
+                //apply uniform haircut
+                double loss = bank.balanceSheet.assets * shock_percentage;
+                bank.balanceSheet.assets -= loss;
+
+                //recalculate equity and update default status
+                update_equity(bank);
+                if (is_insolvent(bank)) {
+                    bank.defaulted = true;
+                }
+            }
+        }
+    }
+ }
+
+ apply_random_bank_shock(std::vector<Bank>& banks, int number_of_banks, double shock_percentage) {
+    //check percentage is within the correct range
+    if (shock_pecentage < 0.0 || shock_pecentage > 1.0) return;
+
+    //collect indices of non-defaulted banks
+    std::vector<size_index_t> active_indices;
+    active_indices.reserve(banks.size());
+    for (size_t i = 0; i < banks.size(); ++i) {
+        if (!banks[i].defaulted) {
+            active_indices.push_back(i);
+        }
+    }
+
+    //shuffle indices
+    std::random_device rd;
+    std::mt19937 g(rd());
+    std::shuffle(active_indices.begin(), active_indices.end(), g);
+
+    //set safe bounds
+    int target_count = std::min(number_of_banks, static_cast<int>(active_indices.size()));
+
+    //shock the selected banks
+    for (int i=0; i < targets_count; ++i) {
+        size_t bank_idx = active_indices[i];
+        Bank& bank = banks[bank_idx];
+
+        double loss = bank.balanceSheet.assets * shock_percentage;
+            bank.balanceSheet.assets -= loss;
+
+        //recalculate equity and update default status
+        update_equity(bank);
+        if (is_insolvent(bank)) {
+            bank.defaulted = true;
+        }
+    }
+ }
