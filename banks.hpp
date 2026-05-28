@@ -30,20 +30,34 @@ struct Bank{
     int id;
     BankType type;
 
-    BankRiskTypes
+    BankRiskTypes riskType = BankRiskType::Robust;
+    BankRole role = BankRole::Peripheral;
 
-    bool defaulted; // no more money - can not pay dept
+    BalanceSheet balanceSheet;
 
-    double targetOvernightLendingRatio; // lending such that the tables match at the end of the day that are being given back overnight
-    double targetOvernightBorrowingRatio; // same but inversed
-    double targetShortTermLendingRatio; // lending from the guvernment
-    double targetShortTermBorrowingRatio; // borrowing from the guvernment
-    double targetLongTermLendingRatio; // lending within banks by own initiative
-    double targetLongTermBorrowingRatio; // the other way around
+    bool defaulted = false; // no more money - can not pay dept
+
+    bool receivedLoss = 0.0;
+
+    double targetOvernightLendingRatio = 0.0; // lending such that the tables match at the end of the day that are being given back overnight
+    double targetOvernightBorrowingRatio = 0.0; // same but inversed
+    double targetShortTermLendingRatio = 0.0; // lending from the guvernment
+    double targetShortTermBorrowingRatio = 0.0; // borrowing from the guvernment
+    double targetLongTermLendingRatio = 0.0; // lending within banks by own initiative
+    double targetLongTermBorrowingRatio = 0.0; // the other way around
 
 };
 
 double compute_equity(const Bank& bank);
+
 bool is_insolvent(const Bank& bank); // asstes < libilities 
-bool is_illiquid(const Bank& bank, double payment_due); //checks if you have or not enough cash
+
+bool is_illiquid(
+    const Bank& bank,
+    double payment_due,
+    double incomingPayment
+); //checks if you have or not enough cash
+
 void update_equity(Bank& bank);
+void apply_loss(Bank& bank, double loss);
+
