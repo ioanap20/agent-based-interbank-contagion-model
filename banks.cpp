@@ -1,71 +1,37 @@
 /*
-* representation and initialization of the bank agents.
-* Each bank is has:
- *  - external assets,
- *  - liquidity,
- *  - interbank assets and liabilities,
- *  - capital,
+* banks.cpp
+ *
+ * Implements the basic financial behaviour of bank agents.
+ *
+ * Each bank has:
+ *  - assets: what the bank owns or what others owe to it,
+ *  - liabilities: what the bank owes to others,
+ *  - cash: immediately available money,
+ *  - equity: the difference between assets and liabilities,
  *  - default status.
  *
- * functions:
- *  - computing total assets and capital,
- *  - checking whether a bank is solvent,
- *  - computing whether a bank has excess liquidity or a liquidity shortage,
- *  - generating the initial population of banks used in the simulation.
+ * Main ideas:
+ *  - A bank is insolvent if its assets are smaller than its liabilities.
+ *  - A bank is illiquid if it does not have enough cash to make a required payment.
+ *  - Equity is recomputed whenever assets or liabilities change.
  *
- * Different types of banks:
- *  - small and large banks,
- *  - fragile and robust banks,
- *  - core and peripheral banks.
 */
 
-#include <vector>
-#include <random>
-#include <algorithm>
-#include <iostream>
+#include "banks.hpp"
 
-enum Type{
-    STRONG,
-    FRAGILE
-};
-
-struct Bank{
-    int id;
-
-    double external_assets;
-    double liquidity;
-    double interbank_assets;
-
-    double external_liabilities;
-    double interbank_liabilities;
-
-    double extra_liquidity;
-    double founding_need;
-
-    bool defaulted;
-    Type type;
-};
-
-double total_assets(const Bank& bank){
-    
+double compute_equity(const Bank& bank){
+    return bank.assets - bank.liabilities;
 }
 
-double total_liabilities(const Bank& bank){
-
+void update_equity(Bank& bank){
+    bank.equity = compute_equity(bank);
 }
 
-double capital(const Bank& bank){
-
+bool is_insolvent(const Bank& bank){
+    return compute_equity(bank) < 0.0;
 }
 
-bool should_default(const Bank& bank){
-
+bool is_illiquid(const Bank& bank, double payment_due){
+    return bank.cash < payment_due;
 }
 
-std::vector<Bank> initialize_banks(int nr_banks, double ratio_fragile){
-
-}
-
-int defaulted_banks(const std::vector<Bank>& banks){
-    
-}
