@@ -13,7 +13,11 @@ enum class LoanType{
 struct Loan{
     int lender;
     int borrower;
+
     double amount;
+    double payment_due;
+    double remaining;
+
     LoanType type;
 };
 
@@ -26,7 +30,10 @@ double lending_gap(const Bank& bank, LoanType type);
 double borrowing_gap(const Bank& bank, LoanType type);
 
 double size_score(const Bank& borrower, const Bank& lender);
-double relationship_score(int borrower_id, int lender_id, LoanType type);
+double relationship_score(int borrower_id, int lender_id, LoanType type, const std::vector<Loan>& previous_loans);
+double combined_score(double size_score_value, double relationship_score_value);
+
 double lending_probability(double score, const Bank& lender);
+double repayment_fraction(LoanType type);
 
 #endif

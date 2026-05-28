@@ -24,13 +24,13 @@ struct BalanceSheet{
 
     double equity; //How much you add to your liabilities to reach your assets 
                     // it should be as big as possible
-}
+};
 
 struct Bank{
     int id;
     BankType type;
 
-    BankRiskTypes riskType = BankRiskType::Robust;
+    BankRiskType riskType = BankRiskType::Robust;
     BankRole role = BankRole::Peripheral;
 
     BalanceSheet balanceSheet;

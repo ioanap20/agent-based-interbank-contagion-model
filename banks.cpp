@@ -20,11 +20,18 @@
 #include "banks.hpp"
 
 double compute_equity(const Bank& bank){
-    return bank.assets - bank.liabilities;
+    double total_assest = bank.assets + bank.cash + bank.otherAssets;
+    double total_liabilities = bank.liabilities + bank.otherLiabilities;
+
+    return total_assest - total_liabilities;
 }
 
 void update_equity(Bank& bank){
     bank.equity = compute_equity(bank);
+
+    if(bank.equity < 0.0){
+        bank.defaulted = true;
+    }
 }
 
 bool is_insolvent(const Bank& bank){

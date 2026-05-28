@@ -24,8 +24,11 @@
 #include <vector>
 #include <algorithm>
 #include <random>
+#inlcude <cmath>
 
 std::random_device rand;
+
+static int loan_type_index(LoanType
 
 std::vector<int> find_lenders(const std::vector<Bank>& banks, double liquidity_target){
    std::vector<int> lenders;
