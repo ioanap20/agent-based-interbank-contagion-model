@@ -23,7 +23,7 @@ double total_assets(const Bank& bank){
         return bank.balanceSheet.assets + bank.balanceSheet.cash + bank.balanceSheet.otherAssets;
 }
 
-double total_lisbilities(const Bank& bank){
+double total_liabilities(const Bank& bank){
         return  bank.balanceSheet.liabilities + bank.balanceSheet.otherLiabilities;
 
 }

@@ -178,11 +178,10 @@ double repayment_fraction(LoanType type){
    return 1.0;
 }
 
-std::vector<Loan> build_interbank_market(std::vector<Bank>& banks,
-double liquidty_target, double max_loan_amount, int max_loans_per_borrower){
-
+std::vector<Loan> build_interbank_market(std::vector<Bank>& banks){
    std::vector<Loan> loans;
 
+   std::random_device randgen;
    std::mt19937 gen(randgen());
 
    const int max_loans_per_borrower = 3;
