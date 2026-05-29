@@ -1,3 +1,5 @@
+#pragma once
+
 #ifndef CONTAGION_HPP
 #define CONTAGION_HPP
 

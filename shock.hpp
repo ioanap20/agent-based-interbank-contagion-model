@@ -1,3 +1,5 @@
+#pragma once
+
 #ifndef SHOCK_HPP
 #define SHOCK_HPP
 

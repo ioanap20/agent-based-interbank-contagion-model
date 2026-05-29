@@ -1,3 +1,5 @@
+#pragma once
+
 #ifndef MARKET_HPP
 #define MARKET_HPP
 

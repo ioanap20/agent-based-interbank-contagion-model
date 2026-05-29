@@ -26,7 +26,7 @@
 #include <random>
 #include <cmath>
 
-std::random_device rand;
+std::random_device randgen;
 
 static int loan_type_index(LoanType type){
    switch(type){
@@ -183,7 +183,7 @@ double liquidty_target, double max_loan_amount, int max_loans_per_borrower){
 
    std::vector<Loan> loans;
 
-   std::mt19937 gen(rand());
+   std::mt19937 gen(randgen());
 
    const int max_loans_per_borrower = 3;
    const double max_loan_amount = 1000.0;

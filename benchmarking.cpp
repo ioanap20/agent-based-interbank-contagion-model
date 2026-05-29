@@ -18,10 +18,10 @@
  *
  */
 
-#include "banks.cpp"
-#include "market.cpp"
-#include "shock.cpp"
-#include "contagion.cpp"
+#include "banks.hpp"
+#include "market.hpp"
+#include "shock.hpp"
+#include "contagion.hpp"
 
 #include <iostream>
 #include <vector>
