@@ -13,8 +13,21 @@
  *
  */
 
-#include "banks.cpp"
-#include "market.cpp"
-#include "shock.cpp"
-#include "contagion.cpp"
+#include "banks.hpp"
+#include "market.hpp"
+#include "shock.hpp"
+#include "contagion.hpp"
 
+#include <iostream>
+
+void run_benchmarking();
+
+int main(){
+    std::cout<<"Running interbank contagion benchmark" << std::endl;
+
+    run_benchmarking();
+
+    std::cout << "Benchmark finished" << std::endl;
+
+    return 0;
+}
