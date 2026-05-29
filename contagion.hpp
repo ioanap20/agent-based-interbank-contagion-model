@@ -8,6 +8,7 @@
 #include "market.hpp"
 
 void run_contagion(std::vector<Bank>& banks, const std::vector<Loan>& loans);
+void run_contagion_parallel(std::vector<Bank>& banks, const std::vector<Loan>& loans, int numberOfThreads);
 
 double total_outgoing_payment(int bank_id, const std::vector<Loan>& loans);
 double total_incoming_payment(int bank_id, const std::vector<Loan>& loans);
