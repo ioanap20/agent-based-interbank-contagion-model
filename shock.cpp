@@ -26,7 +26,7 @@
 
  void apply_asset_shock(std::vector<Bank>& banks, double shock_percentage) {
     //check percentage is within the correct range
-    if (shock_pecentage < 0.0 || shock_pecentage > 1.0) return;
+    if (shock_percentage < 0.0 || shock_percentage > 1.0) return;
 
     //apply shock
     for (auto& bank : banks) {
@@ -46,13 +46,13 @@
 
  void apply_shock_to_large_banks(std::vector<Bank>& banks, double shock_percentage) {
     //check percentage is within the correct range
-    if (shock_pecentage < 0.0 || shock_pecentage > 1.0) return;
+    if (shock_percentage < 0.0 || shock_percentage > 1.0) return;
 
     //apply shock
     for (auto& bank : banks) {
         if (!bank.defaulted) {
             //target=large for systemic core risk test
-            if (bank.type == BankType::Large && |bank.defaulted) {
+            if (bank.type == BankType::Large && !bank.defaulted) {
                 //apply uniform haircut
                 double loss = bank.balanceSheet.assets * shock_percentage;
                 bank.balanceSheet.assets -= loss;
@@ -67,12 +67,12 @@
     }
  }
 
- apply_random_bank_shock(std::vector<Bank>& banks, int number_of_banks, double shock_percentage) {
+void apply_random_bank_shock(std::vector<Bank>& banks, int number_of_banks, double shock_percentage) {
     //check percentage is within the correct range
-    if (shock_pecentage < 0.0 || shock_pecentage > 1.0) return;
+    if (shock_percentage < 0.0 || shock_percentage > 1.0) return;
 
     //collect indices of non-defaulted banks
-    std::vector<size_index_t> active_indices;
+    std::vector<size_t> active_indices;
     active_indices.reserve(banks.size());
     for (size_t i = 0; i < banks.size(); ++i) {
         if (!banks[i].defaulted) {
@@ -89,7 +89,7 @@
     int target_count = std::min(number_of_banks, static_cast<int>(active_indices.size()));
 
     //shock the selected banks
-    for (int i=0; i < targets_count; ++i) {
+    for (int i=0; i < target_count; ++i) {
         size_t bank_idx = active_indices[i];
         Bank& bank = banks[bank_idx];
 

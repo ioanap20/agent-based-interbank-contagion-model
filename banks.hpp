@@ -17,14 +17,14 @@ struct BalanceSheet{
     double assets = 0.0; //what people owe you ex: buildings, shares, trades etc...
         //anything that brings income in the future
     double liabilities = 0.0; //what you owe them
-    
+
     double cash = 0.0; //actual money
     double otherAssets = 0.0;//actual money
     double otherLiabilities = 0.0; //other things besides banks
 
-    double equity; //How much you add to your liabilities to reach your assets 
+    double equity = 0.0; //How much you add to your liabilities to reach your assets 
                     // it should be as big as possible
-};
+    };
 
 struct Bank{
     int id;
@@ -37,7 +37,7 @@ struct Bank{
 
     bool defaulted = false; // no more money - can not pay dept
 
-    bool receivedLoss = 0.0;
+    double receivedLoss = 0.0;
 
     double targetOvernightLendingRatio = 0.0; // lending such that the tables match at the end of the day that are being given back overnight
     double targetOvernightBorrowingRatio = 0.0; // same but inversed
@@ -49,6 +49,8 @@ struct Bank{
 };
 
 double compute_equity(const Bank& bank);
+double total_assets(const Bank& bank);
+double total_liabilities(const Bank& bank);
 
 bool is_insolvent(const Bank& bank); // asstes < libilities 
 

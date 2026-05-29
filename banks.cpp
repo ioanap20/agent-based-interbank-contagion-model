@@ -19,17 +19,23 @@
 
 #include "banks.hpp"
 
-double compute_equity(const Bank& bank){
-    double total_assest = bank.assets + bank.cash + bank.otherAssets;
-    double total_liabilities = bank.liabilities + bank.otherLiabilities;
+double total_assets(const Bank& bank){
+        return bank.balanceSheet.assets + bank.balanceSheet.cash + bank.balanceSheet.otherAssets;
+}
 
-    return total_assest - total_liabilities;
+double total_lisbilities(const Bank& bank){
+        return  bank.balanceSheet.liabilities + bank.balanceSheet.otherLiabilities;
+
+}
+double compute_equity(const Bank& bank){
+
+    return total_assets(bank) - total_liabilities(bank);
 }
 
 void update_equity(Bank& bank){
-    bank.equity = compute_equity(bank);
+    bank.balanceSheet.equity = compute_equity(bank);
 
-    if(bank.equity < 0.0){
+    if(bank.balanceSheet.equity < 0.0){
         bank.defaulted = true;
     }
 }
@@ -38,7 +44,23 @@ bool is_insolvent(const Bank& bank){
     return compute_equity(bank) < 0.0;
 }
 
-bool is_illiquid(const Bank& bank, double payment_due){
-    return bank.cash < payment_due;
+bool is_illiquid(const Bank& bank, double payment_due, double incomingPayment){
+    double available_cash = bank.balanceSheet.cash + incomingPayment;
+    
+    return available_cash < payment_due;
+}
+
+void apply_loss(Bank& bank, double loss){
+    if(loss <= 0) return;
+
+    bank.balanceSheet.assets -= loss;
+
+    if(bank.balanceSheet.assets < 0.0){
+        bank.balanceSheet.assets = 0.0;
+    }
+
+    bank.receivedLoss += loss;
+
+    update_equity(bank);
 }
 
