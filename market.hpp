@@ -23,6 +23,12 @@ struct Loan{
     LoanType type;
 };
 
+//initialises hsitorical multiperiod memory
+void initialize_market_memory(std::vector<Bank>& banks);
+
+//end of period routine to decay elemtns
+void apply_relationship_decay(std::vector<Bank>& banks);
+
 std::vector<Loan> build_interbank_market(std::vector<Bank>& banks);
 
 std::vector<int> find_lenders(const std::vector<Bank>& banks, LoanType type);

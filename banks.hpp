@@ -1,5 +1,7 @@
 #pragma once
 
+#include <vector>
+
 enum class BankType{
     Small,
     Large
@@ -48,6 +50,12 @@ struct Bank{
     double targetLongTermLendingRatio = 0.0; // lending within banks by own initiative
     double targetLongTermBorrowingRatio = 0.0; // the other way around
 
+    //necessary for equation 7 in the paper
+    double sum_log_assets_past_counterparties = 0.0;
+    int count_past_counterparties = 0;
+
+    //necessary for equation 8 in the paper
+    std::vector<std::vector<double>> relationship_scores;
 };
 
 double compute_equity(const Bank& bank);

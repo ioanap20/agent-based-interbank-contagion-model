@@ -33,7 +33,7 @@ static double get_uniform_random(double lower_bound, double upper_bound) {
    static std::random_device rd;
    static std::mt19937 gen(rd());
    std::uniform_real_distribution<double> dis(lower_bound, upper_bound);
-   return dis(gen)
+   return dis(gen);
 }
 
 static int loan_type_index(LoanType type){
@@ -48,6 +48,25 @@ static int loan_type_index(LoanType type){
          return 2;
    }
    return 0;
+}
+
+void initialize_market_memory(std::vector<Bank>& banks) {
+   size_t total_banks = banks.size();
+   for (auto& bank : banks) {
+      //size table mapping to look up 3 independent loan timelines across all banks
+      bank.relationship_scores.assign(total_banks, std::vector<double>(3, 0.0));
+   }
+}
+
+void apply_relationship_decay(std::vector<Bank>& banks) {
+   const double eta = 0.9; //from paper
+   for (auto& bank : banks) {
+      for (auto& counterparty_row : bank.relationship_scores) {
+         for (auto& score: counterparty_row) {
+            score *= eta;
+         }
+      }
+   }
 }
 
 static double target_lending_amount(const Bank& bank, LoanType type){
@@ -133,40 +152,31 @@ std::vector<int> find_borrowers(const std::vector<Bank>& banks, LoanType type){
    return borrowers;
 }
 
+//equation 7
 double size_score(const Bank& borrower, const Bank& lender){
-   double borrower_assets = std::max(total_assets(borrower), 1.0);
-   double lender_assets  = std::max(total_assets(lender), 1.0);
+   double lender_assets = std::max(total_assets(lender), 1.0);
+   double baseline;
 
-   return std::log(lender_assets) - std::log(borrower_assets);
-}
-
-double relationship_score(int borrower_id, int lender_id, LoanType type, const std::vector<Loan>& previous_loans){
-   double score = 0.0;
-
-   for(const Loan& loan : previous_loans){
-      if(loan.borrower == borrower_id && loan.lender == lender_id && loan.type == type){
-         score += std::log(loan.amount + 1.0);
-      }
+   if (borrower.count_past_counterparties>0) {
+      baseline = borrower.sum_log_assets_past_counterparties / borrower.count_past_counterparties;
+   } else {
+      baseline = std::log(std::max(total_assets(borrower), 1.0));
    }
-
-   return score;
+   return std::log(lender_assets) - baseline;
+}
+//pulls historical record
+double relationship_score(const Bank& borrower, int lender_id, LoanType type) {
+   int t_idx = loan_type_index(type);
+   return borrower.relationship_scores[lender_id][t_idx];
 }
 
 double combined_score(double size_score_value, double relationship_score_value){
    return 0.5 * size_score_value + 0.5 * relationship_score_value;
 }
 
-double lending_propability(double score, const Bank& lender){
-   double alpha;
-
-   if(lender.type == BankType::Large){
-      alpha = 0.4;
-   }
-   else{
-      alpha = 1.0;
-   }
-
-   double beta = -1.0;
+double lending_probability(double score, const Bank& lender){
+   double alpha = (lender.type == BankType::Large)? 0.4 : 1.0; //from paper
+   double beta = -1.0; //base policy tightness baseline
 
    return 1.0 / (1.0 + alpha * std::exp(beta * score));
 }
@@ -186,24 +196,31 @@ double repayment_fraction(LoanType type){
    return 1.0;
 }
 
+struct PriorityCandidate {
+   int id;
+   double score;
+   bool is_large_core;
+   double rel_history;
+};
+
 std::vector<Loan> build_interbank_market(std::vector<Bank>& banks){
    std::vector<Loan> loans;
 
-   std::random_device randgen;
-   std::mt19937 gen(randgen());
+   std::random_device rd;
+   std::mt19937 gen(rd());
 
    const int max_loans_per_borrower = 3;
-   const double max_loan_amount = 1000.0;
+   const double max_loan_amount = 50000.0;
 
    std::vector<LoanType> loan_types = {
       LoanType::Overnight, LoanType::ShortTerm, LoanType::LongTerm
    };
 
    for(LoanType type : loan_types){
+      int t_idx = loan_type_index(type);      
       std::vector<int> lenders = find_lenders(banks, type);
       std::vector<int> borrowers = find_borrowers(banks, type);
    
-      std::shuffle(lenders.begin(), lenders.end(), gen);
       std::shuffle(borrowers.begin(), borrowers.end(), gen);
 
       std::vector<double> lent_so_far(banks.size(), 0.0);
@@ -212,28 +229,50 @@ std::vector<Loan> build_interbank_market(std::vector<Bank>& banks){
          double borrowing_need = borrowing_gap(banks[borrower_id], type);
          int loans_created = 0;
 
+         std::vector<PriorityCandidate> preference_queue;
+
          for(int lender_id:lenders){
-            if(borrowing_need <= 0.0){
+            if (lender_id == borrower_id) continue;
+
+            double s_size = size_score(banks[borrower_id], banks[lender_id]);
+            double s_rel = relationship_score(banks[borrower_id], lender_id, type);
+            double c_score = combined_score(s_size, s_rel);
+
+            preference_queue.push_back({
+               lender_id,
+               c_score,
+               (banks[lender_id].type==BankType::Large),
+               s_rel
+            });
+         }
+
+         std::sort(preference_queue.begin(), preference_queue.end(), [](const PriorityCandidate& a, const PriorityCandidate& b) {
+            //large banks first
+            if (a.is_large_core != b.is_large_core) return a.is_large_core > b.is_large_core;
+            //small banks with existing relationship
+            if (!a.is_large_core && ((a.rel_history>0.0) != (b.rel_history>0.0))) {
+               return (a.rel_history>0.0)>(b.rel_history>0.0);
+            }
+            return a.score>b.score;
+         });
+
+         for (const auto& candidate:preference_queue) {
+            int lender_id = candidate.id;
+
+            if(borrowing_need<=0.0 || loans_created>=max_loans_per_borrower){
                break;
             }
-
-            if(loans_created >= max_loans_per_borrower){
-               break;
-            }
-
-            if(lender_id == borrower_id) continue;
 
             double lending_capacity = lending_gap(banks[lender_id], type) - lent_so_far[lender_id];
+            if(lending_capacity<=0.0) continue;
 
-            if(lending_capacity <= 0.0) continue;
-
+            double roll=get_uniform_random(0.0, 1.0);
+            double p_accept = lending_probability(candidate.score, banks[lender_id]);
             double amount = std::min(borrowing_need, lending_capacity);
-
-            if(amount > max_loan_amount){
+            if(amount>max_loan_amount){
                amount = max_loan_amount;
             }
-
-            if(amount <= 0.0) continue;
+            if(amount<=0.0) continue;
 
             Loan loan;
             loan.lender = lender_id;
@@ -246,13 +285,20 @@ std::vector<Loan> build_interbank_market(std::vector<Bank>& banks){
             loans.push_back(loan);
 
             banks[lender_id].balanceSheet.cash -= amount;
-            banks[lender_id].balanceSheet.assets +=  amount;
+            banks[lender_id].balanceSheet.assets += amount;
 
             banks[borrower_id].balanceSheet.cash += amount;
-            banks[borrower_id].balanceSheet.assets +=   amount;
+            banks[borrower_id].balanceSheet.assets += amount;
             
             update_equity(banks[lender_id]);
             update_equity(banks[borrower_id]);
+
+            //equation 8
+            banks[borrower_id].relationship_scores[lender_id][t_idx] = std::log(amount+1.0);
+
+            //equation 7
+            banks[borrower_id].sum_log_assets_past_counterparties+=std::log(total_assets(banks[lender_id])+1.0);
+            banks[borrower_id].count_past_counterparties++;
 
             lent_so_far[lender_id] += amount;
             borrowing_need -= amount;

@@ -68,10 +68,18 @@ static Bank create_random_bank(int id, std::mt19937& gen, bool largeBank){
         bank.role = BankRole::Peripheral;
     }
 
-    std::uniform_real_distribution<double> assetDistribution(1000.0, 10000.0);
-    std::uniform_real_distribution<double> cashDistribution(100.0, 1000.0);
+    std::uniform_real_distribution<double> assetDistribution(50000.0, 2500000.0);
+    std::uniform_real_distribution<double> cashDistribution(5000.0, 250000.0);
 
-    double totalAssetsBeforeLiabilities = bank.balanceSheet.assets + bank.balanceSheet.cash + bank.balanceSheet.otherAssets;
+    if(largeBank){
+        bank.balanceSheet.otherAssets=assetDistribution(gen)*10.0;
+        bank.balanceSheet.cash=cashDistribution(gen)*10.0;
+    }else{
+        bank.balanceSheet.otherAssets=assetDistribution(gen);
+        bank.balanceSheet.cash=cashDistribution(gen);
+    }
+
+    double totalAssetsBeforeLiabilities = total_assets(bank);
 
     if(id % 5 == 0){
         bank.riskType = BankRiskType::Fragile;
@@ -126,6 +134,8 @@ std::vector<Bank> generate_banks(int numberOfBanks){
         banks.push_back(bank);
     }
 
+    initialize_market_memory(banks);
+
     return banks;
 }
 
@@ -156,6 +166,8 @@ static BenchmarkResult run_one_experiment(int numberOfBanks, double shockPercent
     auto parallel_end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> parDuration = parallel_end - parallel_start;
 
+    apply_relationship_decay(sequentialBanks);
+    apply_relationship_decay(parallelBanks);
 
     result.sequentialTimeMs = seqDuration.count();
     result.parallelTimeMs = parDuration.count();
