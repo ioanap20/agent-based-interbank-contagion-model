@@ -297,7 +297,7 @@ static void propagate_losses_from_frontier_parallel(std::vector<Bank>& banks, co
     return next_frontier;
 } 
 
-void run_contagion_parralel(std::vector<Bank>& banks, const std::vector<Loan>& loans, int numberOfThreads){
+void run_contagion_parallel(std::vector<Bank>& banks, const std::vector<Loan>& loans, int numberOfThreads){
     std::vector<char> already_propagated(banks.size(), false);
 
     std::vector<int>frontier = initial_defaulted_banks(banks);

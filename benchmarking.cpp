@@ -29,13 +29,18 @@
 #include <chrono>
 #include <iomanip>
 #include <algorithm>
+#include <thread>
 
 struct BenchmarkResult{
     int numberOfBanks;
     int numberOfLoans;
-    int numberOfDefaults;
+    int numberOfSequentialDefaults;
+    int numberOfParallelDefaults;
+    int numberOfThreads;
     double shockPercentage;
-    double executionTimeMs;
+    double sequentialTimeMs;
+    double parallelTimeMs;
+    double speedup;
 };
 
 static int count_defaulted_banks(const std::vector<Bank>&banks){
@@ -124,47 +129,62 @@ std::vector<Bank> generate_banks(int numberOfBanks){
     return banks;
 }
 
-static BenchmarkResult run_one_experiment(int numberOfBanks, double shockPercentage){
+static BenchmarkResult run_one_experiment(int numberOfBanks, double shockPercentage, int numberOfThreads){
     BenchmarkResult result;
 
     result.numberOfBanks = numberOfBanks;
     result.shockPercentage = shockPercentage;
+    result.numberOfThreads = numberOfThreads;
 
     std::vector<Bank> banks = generate_banks(numberOfBanks);
     std::vector<Loan> loans = build_interbank_market(banks);
 
     result.numberOfLoans = loans.size();
 
-    auto start = std::chrono::high_resolution_clock::now();
-
     apply_random_bank_shock(banks, 1, shockPercentage);
 
-    run_contagion(banks, loans);
+    std::vector<Bank> sequentialBanks = banks;
+    std::vector<Bank> parallelBanks = banks;
 
-    auto end = std::chrono::high_resolution_clock::now();
+    auto sequential_start = std::chrono::high_resolution_clock::now();
+    run_contagion(sequentialBanks, loans);
+    auto sequential_end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> seqDuration = sequential_end - sequential_start;
 
-    std::chrono::duration<double, std::milli> duration = end - start;
+    auto parallel_start = std::chrono::high_resolution_clock::now();
+    run_contagion_parallel(parallelBanks, loans, numberOfThreads);
+    auto parallel_end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> parDuration = parallel_end - parallel_start;
 
-    result.executionTimeMs = duration.count();
-    result.numberOfDefaults = count_defaulted_banks(banks);
+
+    result.sequentialTimeMs = seqDuration.count();
+    result.parallelTimeMs = parDuration.count();
+
+    result.speedup = result.sequentialTimeMs / result.parallelTimeMs;
+
+    result.numberOfSequentialDefaults = count_defaulted_banks(sequentialBanks);
+    result.numberOfParallelDefaults = count_defaulted_banks(parallelBanks);
 
     return result;
 }
 
 void run_benchmarking(){
     std::vector<int> bankNumbers = {100, 500, 1000, 5000};
-
     std::vector<double> shockPercentages = {0.05, 0.10, 0.20, 0.30};
+    std::vector<int> threadNumbers = {1, 2, 4, 8};
 
-    std::cout<<"Banks, Loans, Shock, Defaults, Time(ms)" << std::endl;
+    std::cout<<"Banks, Loans, Shock, Threads, SeqDefaoults, ParDefaults, SeqTime(ms), ParTime(ms), Speedup" << std::endl;
 
     for(int numberOfBanks : bankNumbers){
         for(double shockPercentage : shockPercentages){
-            BenchmarkResult result = run_one_experiment(numberOfBanks, shockPercentage);
+            for(int numberOfThreads : threadNumbers){
+            
+            BenchmarkResult result = run_one_experiment(numberOfBanks, shockPercentage, numberOfThreads);
 
-            std::cout<<result.numberOfBanks<<","<<result.numberOfLoans<<","<<result.shockPercentage<<","<<result.numberOfDefaults<<","
-            <<std::fixed<<std::setprecision(3)<<result.executionTimeMs<<std::endl;
-
+            std::cout<<result.numberOfBanks<<","<<result.numberOfLoans<<","<<result.shockPercentage<<","<<result.numberOfThreads<<","<<result.numberOfSequentialDefaults<<","
+            <<result.numberOfParallelDefaults<<","<<std::fixed<<std::setprecision(3)<<result.sequentialTimeMs<<","<<result.parallelTimeMs<<","<<result.speedup<<std::endl;
+        
+            }
         }
     }
 }
