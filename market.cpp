@@ -286,7 +286,7 @@ std::vector<Loan> build_interbank_market(std::vector<Bank>& banks){
             banks[lender_id].balanceSheet.assets += amount;
 
             banks[borrower_id].balanceSheet.cash += amount;
-            banks[borrower_id].balanceSheet.assets += amount;
+            banks[borrower_id].balanceSheet.liabilities += amount;
             
             update_equity(banks[lender_id]);
             update_equity(banks[borrower_id]);

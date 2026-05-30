@@ -28,6 +28,8 @@
 #include <thread>
 #include <algorithm>
 #include <utility>
+#include <iostream>
+#include <iomanip>
 
 static const double recovery_rate = 0.4;
 
@@ -350,4 +352,94 @@ void run_contagion_parallel(std::vector<Bank>& banks, const std::vector<Loan>& l
 
         frontier = find_next_frontier_parallel(banks, loan_index, already_propagated, numberOfThreads);
     }
+}
+
+static void print_frontier_small(const std::vector<int>& frontier){
+    std::cout<<"Banks defaulting this round: ";
+
+    for(int bank_id : frontier){
+        std::cout << bank_id << " ";
+    }
+    std::cout << std::endl;
+}
+
+static void print_losses_small(const std::vector<std::pair<int, double>>& losses){
+    if(losses.empty()){
+        std::cout<<"No lender receives losses this round" << std::endl;
+        return;
+    }
+
+    std::cout<<"Losses applied this round:" << std::endl;
+
+    for(const auto& lossEntry : losses){
+        std::cout <<" Bank "<< lossEntry.first<<" losses "<<std::fixed<< std::setprecision(2)
+                  << lossEntry.second
+                  << std::endl;
+    }
+}
+
+void run_contagion_small(std::vector<Bank>& banks, const std::vector<Loan>& loans){
+    LoanIndex loan_index = build_loan_index(loans, banks.size());
+
+    std::vector<char> already_propagated(banks.size(), false);
+    std::vector<int> frontier = initial_defaulted_banks(banks);
+
+    if(frontier.empty()){
+        std::cout<<std::endl;
+        std::cout<<"No bank is initially defaulted, so no contagion starts. "<< std::endl;
+        return;
+    }
+
+    std::cout << std::endl;
+    std::cout << "================ CONTAGION CASCADE ================" << std::endl;
+
+    int round = 1;
+
+    while(!frontier.empty()){
+        std::cout << std::endl;
+        std::cout << "ROUND " << round << std::endl;
+        std::cout << std::string(60, '-') << std::endl;
+
+        print_frontier_small(frontier);
+
+        std::vector<std::pair<int, double>> lossesThisRound;
+
+        for(int defaultedBorrower : frontier){
+            for(int loan_idx : loan_index.by_borrower[defaultedBorrower]){
+                const Loan& loan = loans[loan_idx];
+
+                double loss = (1.0 - recovery_rate) * loan.payment_due;
+
+                lossesThisRound.push_back({loan.lender, loss});
+
+                std::cout << "Borrower bank "
+                          << defaultedBorrower
+                          << " cannot repay lender bank "
+                          << loan.lender
+                          << "."
+                          << std::endl;
+
+            }
+        }
+        print_losses_small(lossesThisRound);
+
+        if(!lossesThisRound.empty()){
+            apply_total_losses(banks, lossesThisRound);
+        }
+
+        for(int bank_id : frontier){
+            already_propagated[bank_id] = true;
+        }
+
+        frontier = find_next_frontier(banks, loan_index, already_propagated);
+
+        if(frontier.empty()){
+            std::cout << std::endl;
+            std::cout << "No new banks defaulted. The system is now stable." << std::endl;
+        }
+        round ++;
+    }
+    
+    std::cout << "===================================================" << std::endl;
+
 }
