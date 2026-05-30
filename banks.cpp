@@ -28,7 +28,6 @@ double total_liabilities(const Bank& bank){
 
 }
 double compute_equity(const Bank& bank){
-
     return total_assets(bank) - total_liabilities(bank);
 }
 

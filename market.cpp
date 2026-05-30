@@ -28,6 +28,14 @@
 
 std::random_device randgen;
 
+// Uniform distribution function
+static double get_uniform_random(double lower_bound, double upper_bound) {
+   static std::random_device rd;
+   static std::mt19937 gen(rd());
+   std::uniform_real_distribution<double> dis(lower_bound, upper_bound);
+   return dis(gen)
+}
+
 static int loan_type_index(LoanType type){
    switch(type){
       case LoanType::Overnight:
@@ -170,10 +178,10 @@ double repayment_fraction(LoanType type){
       return 1.0;
    
    case LoanType::ShortTerm:
-      return 0.995;
+      return get_uniform_random(0.99, 1.00);
    
    case LoanType::LongTerm:
-      return 0.25;
+      return get_uniform_random(0.25, 1.00);
    }
    return 1.0;
 }
