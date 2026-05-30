@@ -26,14 +26,12 @@
 #include <random>
 #include <cmath>
 
-std::random_device randgen;
-
 // Uniform distribution function
 static double get_uniform_random(double lower_bound, double upper_bound) {
    static std::random_device rd;
    static std::mt19937 gen(rd());
    std::uniform_real_distribution<double> dis(lower_bound, upper_bound);
-   return dis(gen)
+   return dis(gen);
 }
 
 static int loan_type_index(LoanType type){
@@ -156,7 +154,7 @@ double combined_score(double size_score_value, double relationship_score_value){
    return 0.5 * size_score_value + 0.5 * relationship_score_value;
 }
 
-double lending_propability(double score, const Bank& lender){
+double lending_probability(double score, const Bank& lender){
    double alpha;
 
    if(lender.type == BankType::Large){

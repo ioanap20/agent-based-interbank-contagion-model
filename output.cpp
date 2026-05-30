@@ -12,7 +12,7 @@ static std::string loan_type_to_string(LoanType type){
             return "Overnight";
 
         case LoanType::ShortTerm:
-            return "SHortTerm";
+            return "ShortTerm";
 
         case LoanType::LongTerm:
             return "LongTerm";

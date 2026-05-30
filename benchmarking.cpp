@@ -178,7 +178,7 @@ static BenchmarkResult run_one_experiment(int numberOfBanks, double shockPercent
 }
 
 void run_benchmarking(){
-    std::vector<int> bankNumbers = {100, 500, 1000, 5000};
+    std::vector<int> bankNumbers = {5000, 10000, 20000, 50000};
     std::vector<double> shockPercentages = {0.20, 0.40, 0.60, 0.80};
     std::vector<int> threadNumbers = {1, 2, 4, 8};
 
@@ -187,15 +187,22 @@ void run_benchmarking(){
     for(int numberOfBanks : bankNumbers){
         for(double shockPercentage : shockPercentages){
             for(int numberOfThreads : threadNumbers){
-            
-            BenchmarkResult result = run_one_experiment(numberOfBanks, shockPercentage, numberOfThreads);
-            
-            print_benchmark_row(result.numberOfBanks, result.numberOfLoans, result.shockPercentage,
-            result.numberOfThreads, result.numberOfSequentialDefaults, result.numberOfParallelDefaults, result.sequentialTimeMs,
-            result.parallelTimeMs, result.speedup);
-            
+                BenchmarkResult result = run_one_experiment(numberOfBanks, shockPercentage, numberOfThreads);
+
+                print_benchmark_row(
+                    result.numberOfBanks,
+                    result.numberOfLoans,
+                    result.shockPercentage,
+                    result.numberOfThreads,
+                    result.numberOfSequentialDefaults,
+                    result.numberOfParallelDefaults,
+                    result.sequentialTimeMs,
+                    result.parallelTimeMs,
+                    result.speedup
+                );
+            }
         }
     }
-}
-print_separator();
+
+    print_separator();
 }

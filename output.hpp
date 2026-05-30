@@ -11,7 +11,7 @@ void print_benchmark_header();
 
 void print_benchmark_row(int numberOfBanks, int numberOfLoans, double shockPercentage,
                             int numberOfThreads, int seqDefaults, int parDefaults, double seqTimeMs,
-                            double parTimeMs, double dpeedup);
+                            double parTimeMs, double speedup);
 
 void print_market_demo(const std::vector<Bank>& banksBeforeMarket, 
         const std::vector<Bank>& banksAfterMarket,
