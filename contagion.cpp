@@ -27,6 +27,7 @@
 #include <vector>
 #include <thread>
 #include <algorithm>
+#include <utility>
 
 static const double recovery_rate = 0.4;
 
@@ -176,6 +177,32 @@ void run_contagion(std::vector<Bank>& banks, const std::vector<Loan>& loans){
     }
 }
 
+static void apply_total_losses(std::vector<Bank>& banks, const std::vector<std::pair<int, double>>& losses){
+    std::vector<double> total_losses(banks.size(), 0.0);
+    std::vector<char> touched(banks.size(), false);
+    std::vector<int>touched_banks;
+
+    for(const auto& entry : losses){
+        int bank_id = entry.first;
+        double loss = entry.second;
+
+        if(!touched[bank_id]){
+            touched[bank_id] = true;
+            touched_banks.push_back(bank_id);
+        }
+
+        total_losses[bank_id] += loss;
+    }
+
+    for(int bank_id : touched_banks){
+        apply_loss(banks[bank_id], total_losses[bank_id]);
+
+        if(is_insolvent(banks[bank_id])){
+            banks[bank_id].defaulted = true;
+        }
+    }
+}
+
 static void propagate_losses_from_frontier_parallel(
     std::vector<Bank>& banks,
     const std::vector<Loan>& loans,
@@ -195,10 +222,26 @@ static void propagate_losses_from_frontier_parallel(
         return;
     }
 
+    const int parallel_threshold = 2000;
+
+    if(static_cast<int>(active_loans.size()) < parallel_threshold || numberOfThreads <= 1){
+        std::vector<std::pair<int, double>>losses;
+        losses.reserve(active_loans.size());
+
+        for(int loan_idx : active_loans){
+            const Loan& loan = loans[loan_idx];
+            double loss = (1.0 - recovery_rate) * loan.payment_due;
+            losses.push_back({loan.lender, loss});
+        }
+        apply_total_losses(banks, losses);
+        return;
+    }
+
+
     int threadCount = choose_thread_count(numberOfThreads, active_loans.size());
     
 
-    std::vector<std::vector<double>> local_losses(threadCount, std::vector<double>(banks.size(), 0.0));
+    std::vector<std::vector<std::pair<int, double>>> local_losses(threadCount);
 
     std::vector<std::thread> threads;
     threads.reserve(threadCount);
@@ -206,16 +249,17 @@ static void propagate_losses_from_frontier_parallel(
     for(int thread_id = 0; thread_id < threadCount; thread_id++){
         int begin = static_cast<int>(active_loans.size()) * thread_id / threadCount;
         int end = static_cast<int>(active_loans.size()) * (thread_id + 1) / threadCount;
+        
+        local_losses[thread_id].reserve(end - begin);
 
         threads.emplace_back([&, thread_id, begin, end](){
             for(int i = begin; i < end; i++){
                 int loan_idx = active_loans[i];
                 const Loan& loan = loans[loan_idx];
 
-                int lender_id = loan.lender;
                 double loss = (1.0 - recovery_rate) * loan.payment_due;
 
-                local_losses[thread_id][lender_id] += loss;
+                local_losses[thread_id].push_back({loan.lender, loss});
 
             }
         });
@@ -225,26 +269,19 @@ static void propagate_losses_from_frontier_parallel(
         worker.join();
     }
 
-    std::vector<double> total_losses(banks.size(), 0.0);
-
+    std::vector<std::pair<int, double>> all_losses;
+    all_losses.reserve(active_loans.size());
 
     for(int thread_id = 0; thread_id < threadCount; thread_id++){
-        for(int bank_id = 0; bank_id < banks.size(); bank_id++){
-            total_losses[bank_id] += local_losses[thread_id][bank_id];
+        for(const auto& entry : local_losses[thread_id]){
+            all_losses.push_back(entry);
         }
     }
 
+    apply_total_losses(banks, all_losses);
 
-    for(int bank_id = 0; bank_id < banks.size(); bank_id ++){
-        if(total_losses[bank_id] > 0.0){
-            apply_loss(banks[bank_id], total_losses[bank_id]);
-
-            if(is_insolvent(banks[bank_id])){
-                banks[bank_id].defaulted = true;
-            }
-        }
-    }
 }
+
 
 static std::vector<int> find_next_frontier_parallel(
     std::vector<Bank>& banks,

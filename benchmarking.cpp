@@ -150,7 +150,7 @@ static BenchmarkResult run_one_experiment(int numberOfBanks, double shockPercent
 
     result.numberOfLoans = loans.size();
 
-    apply_random_bank_shock(banks, numberOfBanks / 100, shockPercentage);
+    apply_random_bank_shock(banks, numberOfBanks / 10, shockPercentage);
 
     std::vector<Bank> sequentialBanks = banks;
     std::vector<Bank> parallelBanks = banks;
@@ -180,7 +180,7 @@ static BenchmarkResult run_one_experiment(int numberOfBanks, double shockPercent
 void run_benchmarking(){
     std::vector<int> bankNumbers = {5000, 10000, 20000, 50000};
     std::vector<double> shockPercentages = {0.20, 0.40, 0.60, 0.80};
-    std::vector<int> threadNumbers = {1, 2, 4, 8};
+    std::vector<int> threadNumbers = {2, 4, 8, 10};
 
     print_benchmark_header();
 

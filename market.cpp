@@ -190,7 +190,7 @@ std::vector<Loan> build_interbank_market(std::vector<Bank>& banks){
    std::random_device randgen;
    std::mt19937 gen(randgen());
 
-   const int max_loans_per_borrower = 3;
+   const int max_loans_per_borrower = 50;
    const double max_loan_amount = 1000.0;
 
    std::vector<LoanType> loan_types = {
