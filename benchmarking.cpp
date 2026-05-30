@@ -17,12 +17,13 @@
  *  - speedup obtained from parallelization.
  *
  */
-
 #include "banks.hpp"
 #include "market.hpp"
 #include "shock.hpp"
 #include "contagion.hpp"
+#include "output.hpp"
 
+#include <string>
 #include <iostream>
 #include <vector>
 #include <random>
@@ -56,9 +57,11 @@ static int count_defaulted_banks(const std::vector<Bank>&banks){
 }
 
 static Bank create_random_bank(int id, std::mt19937& gen, bool largeBank){
-    Bank bank;
+    Bank bank{};
 
     bank.id = id;
+    bank.defaulted = false;
+    bank.receivedLoss = 0.0;
 
     if(largeBank){
         bank.type = BankType :: Large;
@@ -71,6 +74,13 @@ static Bank create_random_bank(int id, std::mt19937& gen, bool largeBank){
     std::uniform_real_distribution<double> assetDistribution(1000.0, 10000.0);
     std::uniform_real_distribution<double> cashDistribution(100.0, 1000.0);
 
+    bank.balanceSheet.assets = assetDistribution(gen);
+    bank.balanceSheet.cash = cashDistribution(gen);
+    bank.balanceSheet.otherAssets = 0.2*bank.balanceSheet.assets;
+    bank.balanceSheet.otherLiabilities = 0.0;
+
+
+    //isnt there a function that already does this? CHECK!!!
     double totalAssetsBeforeLiabilities = bank.balanceSheet.assets + bank.balanceSheet.cash + bank.balanceSheet.otherAssets;
 
     if(id % 5 == 0){
@@ -81,7 +91,6 @@ static Bank create_random_bank(int id, std::mt19937& gen, bool largeBank){
         bank.balanceSheet.liabilities = 0.8 * totalAssetsBeforeLiabilities;
     }
 
-    bank.balanceSheet.otherLiabilities = 0.0;
 
     if(largeBank){
         bank.targetOvernightLendingRatio = 0.05;
@@ -141,7 +150,7 @@ static BenchmarkResult run_one_experiment(int numberOfBanks, double shockPercent
 
     result.numberOfLoans = loans.size();
 
-    apply_random_bank_shock(banks, 1, shockPercentage);
+    apply_random_bank_shock(banks, numberOfBanks / 100, shockPercentage);
 
     std::vector<Bank> sequentialBanks = banks;
     std::vector<Bank> parallelBanks = banks;
@@ -170,21 +179,23 @@ static BenchmarkResult run_one_experiment(int numberOfBanks, double shockPercent
 
 void run_benchmarking(){
     std::vector<int> bankNumbers = {100, 500, 1000, 5000};
-    std::vector<double> shockPercentages = {0.05, 0.10, 0.20, 0.30};
+    std::vector<double> shockPercentages = {0.20, 0.40, 0.60, 0.80};
     std::vector<int> threadNumbers = {1, 2, 4, 8};
 
-    std::cout<<"Banks, Loans, Shock, Threads, SeqDefaoults, ParDefaults, SeqTime(ms), ParTime(ms), Speedup" << std::endl;
+    print_benchmark_header();
 
     for(int numberOfBanks : bankNumbers){
         for(double shockPercentage : shockPercentages){
             for(int numberOfThreads : threadNumbers){
             
             BenchmarkResult result = run_one_experiment(numberOfBanks, shockPercentage, numberOfThreads);
-
-            std::cout<<result.numberOfBanks<<","<<result.numberOfLoans<<","<<result.shockPercentage<<","<<result.numberOfThreads<<","<<result.numberOfSequentialDefaults<<","
-            <<result.numberOfParallelDefaults<<","<<std::fixed<<std::setprecision(3)<<result.sequentialTimeMs<<","<<result.parallelTimeMs<<","<<result.speedup<<std::endl;
-        
-            }
+            
+            print_benchmark_row(result.numberOfBanks, result.numberOfLoans, result.shockPercentage,
+            result.numberOfThreads, result.numberOfSequentialDefaults, result.numberOfParallelDefaults, result.sequentialTimeMs,
+            result.parallelTimeMs, result.speedup);
+            
         }
     }
+}
+print_separator();
 }
