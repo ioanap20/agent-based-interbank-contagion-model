@@ -26,8 +26,6 @@
 #include <random>
 #include <cmath>
 
-std::random_device randgen;
-
 // Uniform distribution function
 static double get_uniform_random(double lower_bound, double upper_bound) {
    static std::random_device rd;
