@@ -264,12 +264,13 @@ std::vector<Loan> build_interbank_market(std::vector<Bank>& banks){
             double lending_capacity = lending_gap(banks[lender_id], type) - lent_so_far[lender_id];
             if(lending_capacity<=0.0) continue;
 
+            double willingness_fraction = get_uniform_random(0.5, 1.0);
+            double lender_willingness = lending_capacity*willingness_fraction;
+
             double roll=get_uniform_random(0.0, 1.0);
             double p_accept = lending_probability(candidate.score, banks[lender_id]);
-            double amount = std::min(borrowing_need, lending_capacity);
-            if(amount>max_loan_amount){
-               amount = max_loan_amount;
-            }
+
+            double amount = std::min(borrowing_need, lender_willingness);
             if(amount<=0.0) continue;
 
             Loan loan;
@@ -286,7 +287,7 @@ std::vector<Loan> build_interbank_market(std::vector<Bank>& banks){
             banks[lender_id].balanceSheet.assets += amount;
 
             banks[borrower_id].balanceSheet.cash += amount;
-            banks[borrower_id].balanceSheet.assets += amount;
+            banks[borrower_id].balanceSheet.liabilities += amount;
             
             update_equity(banks[lender_id]);
             update_equity(banks[borrower_id]);
