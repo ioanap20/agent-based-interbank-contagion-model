@@ -13,6 +13,9 @@
  *  6. print the final state.
  */
 
+
+//Check why we cant get more than one round???
+
 #include "small_market.hpp"
 #include "banks.hpp"
 #include "market.hpp"
