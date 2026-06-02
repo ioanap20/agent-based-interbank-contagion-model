@@ -9,7 +9,7 @@
  *  3. form the interbank lending network,
  *  4. apply an external shock,
  *  5. simulate the default contagion cascade,
- *  6. collect and display the final results.
+ *  6. collect and display the final results../
  *
  */
 
@@ -34,7 +34,7 @@ int main(int argc, char* argv[]){
 }
 else{
     std::cout << "Running small visual market demo" << std::endl;
-    run_small_market_visualization();
+    run_random_small_market_visualization();
     std::cout << "Demo finished" << std::endl;
 }
 
