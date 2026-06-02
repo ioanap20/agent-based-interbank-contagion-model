@@ -297,3 +297,27 @@ void print_final_bank_states(const std::vector<Bank>& banks){
 
     std::cout << "===================================================" << std::endl;
 }
+
+void print_frontier_small(const std::vector<int>& frontier){
+    std::cout<<"Banks defaulting this round: ";
+
+    for(int bank_id : frontier){
+        std::cout << bank_id << " ";
+    }
+    std::cout << std::endl;
+}
+
+void print_losses_small(const std::vector<std::pair<int, double>>& losses){
+    if(losses.empty()){
+        std::cout<<"No lender receives losses this round" << std::endl;
+        return;
+    }
+
+    std::cout<<"Losses applied this round:" << std::endl;
+
+    for(const auto& lossEntry : losses){
+        std::cout <<" Bank "<< lossEntry.first<<" losses "<<std::fixed<< std::setprecision(2)
+                  << lossEntry.second
+                  << std::endl;
+    }
+}

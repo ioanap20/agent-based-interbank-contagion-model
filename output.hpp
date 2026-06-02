@@ -24,6 +24,10 @@ void print_small_market_intro(int numberOfBanks);
 
 void print_no_loans_message();
 
+void print_frontier_small(const std::vector<int>& frontier);
+
+void print_losses_small(const std::vector<std::pair<int, double>>& losses);
+
 void print_external_shock_message(int shockedBank);
 
 void print_final_bank_states(const std::vector<Bank>& banks);
