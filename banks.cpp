@@ -52,14 +52,20 @@ bool is_illiquid(const Bank& bank, double payment_due, double incomingPayment){
 void apply_loss(Bank& bank, double loss){
     if(loss <= 0) return;
 
-    bank.balanceSheet.assets -= loss;
+    double remaining = loss;
 
-    if(bank.balanceSheet.assets < 0.0){
-        bank.balanceSheet.assets = 0.0;
-    }
+    double from_assets = std::min(remaining, bank.balanceSheet.assets);
+    bank.balanceSheet.assets -= from_assets;
+    remaining -= from_assets;
 
+    double from_other = std::min(remaining, bank.balanceSheet.otherAssets);
+    bank.balanceSheet.otherAssets -= from_other;
+    remaining -= from_other;
+
+    double from_cash = std::min(remaining, bank.balanceSheet.cash);
+    bank.balanceSheet.cash -= from_cash;
+    
     bank.receivedLoss += loss;
-
     update_equity(bank);
 }
 

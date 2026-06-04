@@ -264,12 +264,13 @@ std::vector<Loan> build_interbank_market(std::vector<Bank>& banks){
             double lending_capacity = lending_gap(banks[lender_id], type) - lent_so_far[lender_id];
             if(lending_capacity<=0.0) continue;
 
+            double willingness_fraction = get_uniform_random(0.5, 1.0);
+            double lender_willingness = lending_capacity*willingness_fraction;
+
             double roll=get_uniform_random(0.0, 1.0);
             double p_accept = lending_probability(candidate.score, banks[lender_id]);
-            double amount = std::min(borrowing_need, lending_capacity);
-            if(amount>max_loan_amount){
-               amount = max_loan_amount;
-            }
+
+            double amount = std::min(borrowing_need, lender_willingness);
             if(amount<=0.0) continue;
 
             Loan loan;
@@ -286,7 +287,7 @@ std::vector<Loan> build_interbank_market(std::vector<Bank>& banks){
             banks[lender_id].balanceSheet.assets += amount;
 
             banks[borrower_id].balanceSheet.cash += amount;
-            banks[borrower_id].balanceSheet.assets += amount;
+            banks[borrower_id].balanceSheet.liabilities += amount;
             
             update_equity(banks[lender_id]);
             update_equity(banks[borrower_id]);
@@ -306,6 +307,46 @@ std::vector<Loan> build_interbank_market(std::vector<Bank>& banks){
    }   
    return loans;
 
+}
+
+LoanIndex build_loan_index(const std::vector<Loan>& loans, int num_banks){
+    LoanIndex index;
+
+    index.by_borrower.assign(num_banks, {}); // at the begining 
+    index.outgoing_payment.assign(num_banks, 0.0);
+    index.incoming_payment.assign(num_banks, 0.0);
+
+    for(int loan_idx = 0; loan_idx < loans.size(); loan_idx ++){
+        const Loan& loan = loans[loan_idx];
+        index.by_borrower[loan.borrower].push_back(loan_idx); //stores a list of loans where that bank borrowed money from
+        index.outgoing_payment[loan.borrower] += loan.payment_due; //how much that bank has to repay to others
+        index.incoming_payment[loan.lender] += loan.payment_due; // how much that bank expects back
+    }
+    return index;
+}
+
+double total_outgoing_payment(int bank_id, const std::vector<Loan>& loans){
+   double total = 0.0;
+
+   for(const Loan& loan : loans){
+      if(loan.borrower == bank_id){
+         total += loan.payment_due;
+      }
+   }
+
+   return total;
+}
+
+double total_incoming_payment(int bank_id, const std::vector<Loan>& loans){
+   double total = 0.0;
+
+   for(const Loan& loan : loans){
+      if(loan.lender == bank_id){
+         total += loan.payment_due;
+      }
+   }
+
+   return total;
 }
 
 

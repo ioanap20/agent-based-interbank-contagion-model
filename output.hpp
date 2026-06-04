@@ -1,4 +1,5 @@
-#pragma once
+#ifndef OUTPUT_HPP
+#define OUTPUT_HPP
 
 #include "banks.hpp"
 #include "market.hpp"
@@ -17,5 +18,20 @@ void print_market_demo(const std::vector<Bank>& banksBeforeMarket,
         const std::vector<Bank>& banksAfterMarket,
         const std::vector<Loan>& loans);
 
+void run_small_market_visualisation();
+
+void print_small_market_intro(int numberOfBanks);
+
+void print_no_loans_message();
+
+void print_frontier_small(const std::vector<int>& frontier);
+
+void print_losses_small(const std::vector<std::pair<int, double>>& losses);
+
+void print_external_shock_message(int shockedBank);
+
+void print_final_bank_states(const std::vector<Bank>& banks);
+
+#endif
 
                     
