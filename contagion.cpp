@@ -22,6 +22,8 @@
  *
  */
 
+// check if we can add more difficult formulas and how does that affect the market and the speedup? Use the commented code
+
 #include "contagion.hpp"
 #include "banks.hpp"
 #include "output.hpp"
