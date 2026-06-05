@@ -1,5 +1,7 @@
 #include "output.hpp"
-
+#include "market.hpp"
+#include "contagion.hpp"
+#include <vector>
 #include <iostream>
 #include <iomanip>
 #include <string>
@@ -222,4 +224,100 @@ void print_market_demo(const std::vector<Bank>& banksBeforeMarket, const std::ve
     std::cout << "  - This loan network is the channel through which defaults propagate later." << std::endl;
     std::cout << "=======================================================" << std::endl;
 
+}
+
+static int count_defaulted_banks_output(const std::vector<Bank>& banks){
+    int count = 0;
+
+    for(const Bank& bank : banks){
+        if(bank.defaulted){
+            count++;
+        }
+    }
+    return count;
+}
+
+void print_small_market_intro(int numberOfBanks){
+    std::cout << std::endl;
+    std::cout << "================ SMALL MARKET VISUALIZATION ================" << std::endl;
+    std::cout << "This run is not used for benchmarking." << std::endl;
+    std::cout << "It is only meant to show how the interbank market works." << std::endl;
+    std::cout << "Number of banks: " << numberOfBanks << std::endl;
+    std::cout << "============================================================" << std::endl;
+}
+
+void print_no_loans_message(){
+   std::cout << std::endl;
+    std::cout << "No loans were created, so there is no contagion channel." << std::endl;
+    std::cout << "Try increasing the number of banks from 12 to 15 or 20." << std::endl;
+}
+
+void print_external_shock_message(int shockedBank){
+    std::cout << std::endl;
+    std::cout << "================ EXTERNAL SHOCK ================" << std::endl;
+    std::cout << "For the demo, bank " << shockedBank << " is shocked first." << std::endl;
+    std::cout << "This bank was chosen because it received many loans." << std::endl;
+    std::cout << "If this borrower defaults, its lenders suffer losses." << std::endl;
+    std::cout << "================================================" << std::endl;
+}
+
+void print_final_bank_states(const std::vector<Bank>& banks){
+    std::cout << std::endl;
+    std::cout << "================ FINAL BANK STATES ================" << std::endl;
+
+    print_separator(100);
+
+    std::cout << std::left
+              << std::setw(8)  << "Bank"
+              << std::setw(14) << "Defaulted"
+              << std::setw(16) << "Cash"
+              << std::setw(16) << "Liabilities"
+              << std::setw(16) << "Equity"
+              << std::setw(16) << "Loss"
+              << std::endl;
+
+    print_separator(100);
+    for(const Bank& bank : banks){
+        std::cout << std::left
+                  << std::setw(8)  << bank.id
+                  << std::setw(14) << (bank.defaulted ? "YES" : "NO")
+                  << std::setw(16) << std::fixed << std::setprecision(2) << bank.balanceSheet.cash
+                  << std::setw(16) << std::fixed << std::setprecision(2) << bank.balanceSheet.liabilities
+                  << std::setw(16) << std::fixed << std::setprecision(2) << bank.balanceSheet.equity
+                  << std::setw(16) << std::fixed << std::setprecision(2) << bank.receivedLoss
+                  << std::endl;
+    }
+
+    print_separator(100);
+     std::cout << "Defaulted banks: "
+              << count_defaulted_banks_output(banks)
+              << " / "
+              << banks.size()
+              << std::endl;
+
+    std::cout << "===================================================" << std::endl;
+}
+
+void print_frontier_small(const std::vector<int>& frontier){
+    std::cout<<"Banks defaulting this round: ";
+
+    for(int bank_id : frontier){
+        std::cout << bank_id << " ";
+    }
+    std::cout << std::endl;
+}
+
+void print_losses_small(const std::vector<std::pair<int, double>>& losses){
+    if(losses.empty()){
+        std::cout<<"No lender receives losses this round" << std::endl;
+        return;
+    }
+
+    std::cout<<"Losses applied this round:" << std::endl;
+
+    for(const auto& lossEntry : losses){
+        std::cout <<" Bank "<< lossEntry.first<<" losses "<<std::fixed<< std::setprecision(2)
+                  << lossEntry.second
+                  << std::endl;
+    }
 }
