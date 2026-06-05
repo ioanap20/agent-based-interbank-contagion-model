@@ -183,13 +183,13 @@ double repayment_fraction(LoanType type){
    switch (type)
    {
    case LoanType::Overnight:
-      return 1.0;
+      return get_uniform_random(1.001, 1.005);
    
    case LoanType::ShortTerm:
-      return get_uniform_random(0.99, 1.00);
+      return get_uniform_random(1.01, 1.03);
    
    case LoanType::LongTerm:
-      return get_uniform_random(0.25, 1.00);
+      return get_uniform_random(1.03, 1.08);
    }
    return 1.0;
 }
@@ -207,8 +207,15 @@ std::vector<Loan> build_interbank_market(std::vector<Bank>& banks){
    std::random_device rd;
    std::mt19937 gen(rd());
 
-   const int max_loans_per_borrower = 3;
-   const double max_loan_amount = 50000.0;
+   const int max_loans_per_borrower = 8;
+   const double max_loan_amount = 100000.0;
+
+   // Prevents one lender from giving away almost all its cash in one loan
+   const double max_fraction_of_lender_cash = 0.90;
+
+   const double max_fraction_of_lender_equity = 6.00;
+
+   double min_loan_amount = 5000.0;
 
    std::vector<LoanType> loan_types = {
       LoanType::Overnight, LoanType::ShortTerm, LoanType::LongTerm
@@ -264,21 +271,32 @@ std::vector<Loan> build_interbank_market(std::vector<Bank>& banks){
             double lending_capacity = lending_gap(banks[lender_id], type) - lent_so_far[lender_id];
             if(lending_capacity<=0.0) continue;
 
-            double willingness_fraction = get_uniform_random(0.5, 1.0);
+            double willingness_fraction = get_uniform_random(0.85, 1.0);
             double lender_willingness = lending_capacity*willingness_fraction;
 
             double roll=get_uniform_random(0.0, 1.0);
             double p_accept = lending_probability(candidate.score, banks[lender_id]);
 
-            double amount = std::min(borrowing_need, lender_willingness);
-            if(amount<=0.0) continue;
+            
+            if(roll > p_accept) continue;
+
+            double cash_limit = max_fraction_of_lender_cash * banks[lender_id].balanceSheet.cash;
+
+            double equity_limit = max_fraction_of_lender_equity * std::max(banks[lender_id].balanceSheet.equity, 1.0);
+            
+            double amount = 3.0 * std::min({borrowing_need, lender_willingness, max_loan_amount, equity_limit});
+            if(amount<=min_loan_amount) continue;
 
             Loan loan;
             loan.lender = lender_id;
             loan.borrower = borrower_id;
             loan.amount = amount;
+
             loan.payment_due = amount * repayment_fraction(type);
-            loan.remaining = amount - loan.payment_due;
+
+            //loan.remaining = amount - loan.payment_due;
+            loan.remaining = 0.0;
+
             loan.type = type;
 
             loans.push_back(loan);

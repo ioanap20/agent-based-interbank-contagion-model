@@ -39,7 +39,7 @@
 #include <string>
 #include <iostream>
 
-static const double recovery_rate = 0.4;
+static const double recovery_rate = 0.1;
 
 //Instead of creating new threads every time we want to parallelize a loop, this class creates the threads once, keeps them alive, and reuses them for different parallel loops because creating threads is expensive.
 

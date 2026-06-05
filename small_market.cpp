@@ -96,7 +96,7 @@ static std::vector<int>choose_top_borrowers(const std::vector<Loan>& loans, int 
 
 
 void run_small_market_visualization(){
-    const int numberOfBanks = 12;
+    const int numberOfBanks = 22;
 
     print_small_market_intro(numberOfBanks);
 
