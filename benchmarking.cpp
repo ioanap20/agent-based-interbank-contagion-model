@@ -143,11 +143,9 @@ std::vector<Bank> generate_banks(int numberOfBanks){
     return banks;
 }
 
-static void run_one_experiment(int numberOfBanks, double shockPercentage, const std::vector<int>& threadNumbers){
-    std::vector<Bank> banks=generate_banks(numberOfBanks);
-    //std::vector<Loan> loans=build_interbank_market(banks);
-
-    std::vector<Loan> loans;
+static void run_one_experiment(const std::vector<Bank>& baseBanks, const std::vector<std::vector<Loan>>& preBuiltLoans, int numberOfBanks, double shockPercentage, const std::vector<int>& threadNumbers){
+    std::vector<Bank> banks=baseBanks;
+    std::vector<Loan> cumulativeLoans;
     const int numQuarters=4;
 
     double totalSeqTime=0.0;
@@ -160,8 +158,8 @@ static void run_one_experiment(int numberOfBanks, double shockPercentage, const 
 
     for(int q=0; q<numQuarters; ++q){
 
-        std::vector<Loan> newLoans=build_interbank_market(banks);
-        loans.insert(loans.end(), newLoans.begin(), newLoans.end());
+        const std::vector<Loan>& quarterLoans=preBuiltLoans[q];
+        cumulativeLoans.insert(cumulativeLoans.end(), quarterLoans.begin(), quarterLoans.end());
 
         if(q==0){
             apply_random_bank_shock(banks, numberOfBanks/10, shockPercentage);
@@ -171,7 +169,7 @@ static void run_one_experiment(int numberOfBanks, double shockPercentage, const 
 
         std::vector<Bank> sequentialBanks = quarterStartBanks;
         auto sequential_start = std::chrono::high_resolution_clock::now();
-        run_contagion(sequentialBanks, loans);
+        run_contagion(sequentialBanks, cumulativeLoans);
         auto sequential_end = std::chrono::high_resolution_clock::now();
         totalSeqTime += std::chrono::duration<double, std::milli> (sequential_end - sequential_start).count();
 
@@ -181,7 +179,7 @@ static void run_one_experiment(int numberOfBanks, double shockPercentage, const 
             std::vector<Bank>parallelBanks = quarterStartBanks;
 
             auto parallel_start = std::chrono::high_resolution_clock::now();
-            run_contagion_parallel(parallelBanks, loans, numberOfThreads);
+            run_contagion_parallel(parallelBanks, cumulativeLoans, numberOfThreads);
             auto parallel_end = std::chrono::high_resolution_clock::now();
             
             totalParTimes[i] += std::chrono::duration<double, std::milli> (parallel_end - parallel_start).count();
@@ -193,7 +191,7 @@ static void run_one_experiment(int numberOfBanks, double shockPercentage, const 
 
         if(q==numQuarters-1){
             finalSeqDefaults=count_defaulted_banks(sequentialBanks);
-            finalLoanCount = loans.size();
+            finalLoanCount = static_cast<int>(cumulativeLoans.size());
         }
 
         banks=sequentialBanks;
@@ -227,8 +225,17 @@ void run_benchmarking(){
     print_benchmark_header();
 
     for(int numberOfBanks : bankNumbers){
+        std::vector<Bank> baseBanks=generate_banks(numberOfBanks);
+        std::vector<std::vector<Loan>> preBuiltLoans(4);
+        std::vector<Bank> generationBanks=baseBanks;
+
+        for(int q=0; q<4; ++q){
+            preBuiltLoans[q]=build_interbank_market(generationBanks);
+            apply_relationship_decay(generationBanks);
+        }
+
         for(double shockPercentage : shockPercentages){
-            run_one_experiment(numberOfBanks, shockPercentage, threadNumbers);
+            run_one_experiment(baseBanks, preBuiltLoans, numberOfBanks, shockPercentage, threadNumbers);
         }
     }
 
