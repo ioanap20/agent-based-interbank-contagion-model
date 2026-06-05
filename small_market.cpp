@@ -25,6 +25,7 @@
 #include <vector>
 #include <iostream>
 #include <random>
+#include <algorithm>
 
 std::vector<Bank> generate_banks(int numberOfBanks);
 

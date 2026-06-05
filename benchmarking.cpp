@@ -143,45 +143,47 @@ std::vector<Bank> generate_banks(int numberOfBanks){
     return banks;
 }
 
-static BenchmarkResult run_one_experiment(int numberOfBanks, double shockPercentage, int numberOfThreads){
-    BenchmarkResult result;
+static void run_unified_experiment(int numberOfBanks, double shockPercentage, const std::vector<int>& threadNumbers){
+    std::vector<Bank> baseBanks=generate_banks(numberOfBanks);
+    std::vector<Loan> baseLoans=build_interbank_market(baseBanks);
+    int loanCount=static_cast<int>(baseLoans.size());
 
-    result.numberOfBanks = numberOfBanks;
-    result.shockPercentage = shockPercentage;
-    result.numberOfThreads = numberOfThreads;
+    apply_random_bank_shock(baseBanks, numberOfBanks / 10, shockPercentage);
 
-    std::vector<Bank> banks = generate_banks(numberOfBanks);
-    std::vector<Loan> loans = build_interbank_market(banks);
-
-    result.numberOfLoans = loans.size();
-
-    apply_random_bank_shock(banks, numberOfBanks / 10, shockPercentage);
-
-    std::vector<Bank> sequentialBanks = banks;
-    std::vector<Bank> parallelBanks = banks;
-
+    std::vector<Bank> sequentialBanks = baseBanks;
     auto sequential_start = std::chrono::high_resolution_clock::now();
-    run_contagion(sequentialBanks, loans);
+    run_contagion(sequentialBanks, baseLoans);
     auto sequential_end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> seqDuration = sequential_end - sequential_start;
 
-    auto parallel_start = std::chrono::high_resolution_clock::now();
-    run_contagion_parallel(parallelBanks, loans, numberOfThreads);
-    auto parallel_end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double, std::milli> parDuration = parallel_end - parallel_start;
-
+    int seqDefaults=count_defaulted_banks(sequentialBanks);
     apply_relationship_decay(sequentialBanks);
-    apply_relationship_decay(parallelBanks);
 
-    result.sequentialTimeMs = seqDuration.count();
-    result.parallelTimeMs = parDuration.count();
+    for(int numberOfThreads:threadNumbers){
+        std::vector<Bank> parallelBanks = baseBanks;
 
-    result.speedup = result.sequentialTimeMs / result.parallelTimeMs;
+        auto parallel_start = std::chrono::high_resolution_clock::now();
+        run_contagion_parallel(parallelBanks, baseLoans, numberOfThreads);
+        auto parallel_end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> parDuration = parallel_end - parallel_start;
 
-    result.numberOfSequentialDefaults = count_defaulted_banks(sequentialBanks);
-    result.numberOfParallelDefaults = count_defaulted_banks(parallelBanks);
+        int parDefaults=count_defaulted_banks(parallelBanks);
+        apply_relationship_decay(parallelBanks);
 
-    return result;
+        double speedup=seqDuration.count()/parDuration.count();
+
+        print_benchmark_row(
+            numberOfBanks,
+            loanCount,
+            shockPercentage,
+            numberOfThreads,
+            seqDefaults,
+            parDefaults,
+            seqDuration.count(),
+            parDuration.count(),
+            speedup
+        );
+    }
 }
 
 void run_benchmarking(){
@@ -193,21 +195,7 @@ void run_benchmarking(){
 
     for(int numberOfBanks : bankNumbers){
         for(double shockPercentage : shockPercentages){
-            for(int numberOfThreads : threadNumbers){
-                BenchmarkResult result = run_one_experiment(numberOfBanks, shockPercentage, numberOfThreads);
-
-                print_benchmark_row(
-                    result.numberOfBanks,
-                    result.numberOfLoans,
-                    result.shockPercentage,
-                    result.numberOfThreads,
-                    result.numberOfSequentialDefaults,
-                    result.numberOfParallelDefaults,
-                    result.sequentialTimeMs,
-                    result.parallelTimeMs,
-                    result.speedup
-                );
-            }
+            run_unified_experiment(numberOfBanks, shockPercentage, threadNumbers);
         }
     }
 
