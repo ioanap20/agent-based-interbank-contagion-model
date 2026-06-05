@@ -143,48 +143,81 @@ std::vector<Bank> generate_banks(int numberOfBanks){
     return banks;
 }
 
-static void run_unified_experiment(int numberOfBanks, double shockPercentage, const std::vector<int>& threadNumbers){
-    std::vector<Bank> baseBanks=generate_banks(numberOfBanks);
-    std::vector<Loan> baseLoans=build_interbank_market(baseBanks);
-    int loanCount=static_cast<int>(baseLoans.size());
+static void run_one_experiment(int numberOfBanks, double shockPercentage, const std::vector<int>& threadNumbers){
+    std::vector<Bank> banks=generate_banks(numberOfBanks);
+    //std::vector<Loan> loans=build_interbank_market(banks);
 
-    apply_random_bank_shock(baseBanks, numberOfBanks / 10, shockPercentage);
+    std::vector<Loan> loans;
+    const int numQuarters=4;
 
-    std::vector<Bank> sequentialBanks = baseBanks;
-    auto sequential_start = std::chrono::high_resolution_clock::now();
-    run_contagion(sequentialBanks, baseLoans);
-    auto sequential_end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double, std::milli> seqDuration = sequential_end - sequential_start;
+    double totalSeqTime=0.0;
+    std::vector<double> totalParTimes(threadNumbers.size(), 0.0);
 
-    int seqDefaults=count_defaulted_banks(sequentialBanks);
-    apply_relationship_decay(sequentialBanks);
+    int finalSeqDefaults=0;
+    std::vector<int> finalParDefaults(threadNumbers.size(), 0);
 
-    for(int numberOfThreads:threadNumbers){
-        std::vector<Bank> parallelBanks = baseBanks;
+    int finalLoanCount=0;
 
-        auto parallel_start = std::chrono::high_resolution_clock::now();
-        run_contagion_parallel(parallelBanks, baseLoans, numberOfThreads);
-        auto parallel_end = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double, std::milli> parDuration = parallel_end - parallel_start;
+    for(int q=0; q<numQuarters; ++q){
 
-        int parDefaults=count_defaulted_banks(parallelBanks);
-        apply_relationship_decay(parallelBanks);
+        std::vector<Loan> newLoans=build_interbank_market(banks);
+        loans.insert(loans.end(), newLoans.begin(), newLoans.end());
 
-        double speedup=seqDuration.count()/parDuration.count();
+        if(q==0){
+            apply_random_bank_shock(banks, numberOfBanks/10, shockPercentage);
+        }
+
+        std::vector<Bank> quarterStartBanks = banks;
+
+        std::vector<Bank> sequentialBanks = quarterStartBanks;
+        auto sequential_start = std::chrono::high_resolution_clock::now();
+        run_contagion(sequentialBanks, loans);
+        auto sequential_end = std::chrono::high_resolution_clock::now();
+        totalSeqTime += std::chrono::duration<double, std::milli> (sequential_end - sequential_start).count();
+
+
+        for(std::size_t i = 0; i<threadNumbers.size(); i++){
+            int numberOfThreads = threadNumbers[i];
+            std::vector<Bank>parallelBanks = quarterStartBanks;
+
+            auto parallel_start = std::chrono::high_resolution_clock::now();
+            run_contagion_parallel(parallelBanks, loans, numberOfThreads);
+            auto parallel_end = std::chrono::high_resolution_clock::now();
+            
+            totalParTimes[i] += std::chrono::duration<double, std::milli> (parallel_end - parallel_start).count();
+
+            if(q==numQuarters - 1){
+                finalParDefaults[i] = count_defaulted_banks(parallelBanks);
+            }
+        }
+
+        if(q==numQuarters-1){
+            finalSeqDefaults=count_defaulted_banks(sequentialBanks);
+            finalLoanCount = loans.size();
+        }
+
+        banks=sequentialBanks;
+
+        apply_relationship_decay(banks);
+    }
+
+    for(std::size_t i=0; i<threadNumbers.size();i++){
+        double speedup=totalSeqTime/totalParTimes[i];
 
         print_benchmark_row(
-            numberOfBanks,
-            loanCount,
-            shockPercentage,
-            numberOfThreads,
-            seqDefaults,
-            parDefaults,
-            seqDuration.count(),
-            parDuration.count(),
-            speedup
-        );
+                numberOfBanks,
+                finalLoanCount,
+                shockPercentage,
+                threadNumbers[i],
+                finalSeqDefaults,
+                finalParDefaults[i],
+                totalSeqTime,
+                totalParTimes[i],
+                speedup
+            );
     }
 }
+
 
 void run_benchmarking(){
     std::vector<int> bankNumbers = {5000, 10000, 20000, 50000};
@@ -195,7 +228,7 @@ void run_benchmarking(){
 
     for(int numberOfBanks : bankNumbers){
         for(double shockPercentage : shockPercentages){
-            run_unified_experiment(numberOfBanks, shockPercentage, threadNumbers);
+            run_one_experiment(numberOfBanks, shockPercentage, threadNumbers);
         }
     }
 
