@@ -34,6 +34,29 @@
 #include <utility>
 #include <future>
 #include <mutex>
+#include <condition_variable>
+
+struct SimpleThreadBarrier{
+    std::mutex mtx;
+    std::condition_variable cv;
+    int total_threads;
+    int dynamic_spaces;
+    int current_generation;
+
+    SimpleThreadBarrier(int threads) : total_threads(threads), dynamic_spaces(threads), current_generation(0) {}
+
+    void wait() {
+        std::unique_lock<std::mutex> lock(mtx);
+        int gen=current_generation;
+        if(--dynamic_spaces==0){
+            current_generation++;
+            dynamic_spaces=total_threads;
+            cv.notify_all();
+        }else{
+            cv.wait(lock, [this, gen] {return gen != current_generation; });
+        }
+    }
+};
 #include <functional>
 #include <condition_variable>
 #include <string>
@@ -455,34 +478,39 @@ void run_contagion_parallel(std::vector<Bank>& banks, const std::vector<Loan>& l
 
     std::vector<std::vector<double>> local_incoming(threadCount, std::vector<double>(num_banks, 0.0));
     std::vector<double> global_incoming_payments(num_banks,0.0);
+    bool global_converged = false;
 
-    for(int iter=0;iter<max_iterations; ++iter){
+    SimpleThreadBarrier calculation_barrier(threadCount+1);
+    SimpleThreadBarrier evaluation_barrier(threadCount+1);
 
-        for(int t=0; t<threadCount; ++t){
-            std::fill(local_incoming[t].begin(), local_incoming[t].end(), 0.0);
-        }
-        
-        std::vector<std::future<void>> futures;
+    std::vector<std::thread> workers;
+    for(int t=0;t<threadCount; ++t){
+        int begin=static_cast<int>(loans.size())*t/threadCount;
+        int end=static_cast<int>(loans.size())*(t+1)/threadCount;
 
-        for(int t=0; t<threadCount; ++t){
-            int begin=static_cast<int>(loans.size())*t/threadCount;
-            int end=static_cast<int>(loans.size())*(t+1)/threadCount;
+        workers.emplace_back([&, t, begin, end](){
+            for(int iter=0; iter<max_iterations; ++iter){
+                std::fill(local_incoming[t].begin(), local_incoming[t].end(), 0.0);
 
-            futures.push_back(std::async(std::launch::async, [&, t, begin, end](){
                 for(int j=begin; j<end; ++j){
-                    const auto& loan = loans[j];
+                    const auto& loan=loans[j];
                     local_incoming[t][loan.lender]+=loan.payment_due*repayment_ratio[loan.borrower];
                 }
-            }));
-        }
 
-        for(auto& fut:futures){
-            fut.get();
-        }
+                calculation_barrier.wait();
+                evaluation_barrier.wait();
 
-        std::vector<double> global_incoming_payments(num_banks, 0.0);
+                if(global_converged) break;
+            }
+        });
+    }
+
+    for(int iter=0; iter<max_iterations; ++iter){
+        calculation_barrier.wait();
+
+        std::fill(global_incoming_payments.begin(), global_incoming_payments.end(), 0.0);
         for(int t=0; t<threadCount; ++t){
-            for(int i=0; i<num_banks; ++i){
+            for(int i=0; i<num_banks; i++){
                 global_incoming_payments[i]+=local_incoming[t][i];
             }
         }
@@ -505,7 +533,17 @@ void run_contagion_parallel(std::vector<Bank>& banks, const std::vector<Loan>& l
         }
 
         repayment_ratio=next_ratio;
-        if(max_difference<convergence_epsilon) break;
+
+        if(max_difference<convergence_epsilon){
+            global_converged=true;
+        }
+
+        evaluation_barrier.wait();
+        if(global_converged) break;
+    }
+
+    for(auto& worker:workers){
+        if(worker.joinable()) worker.join();
     }
 
     std::vector<double> total_incoming(num_banks, 0.0);
