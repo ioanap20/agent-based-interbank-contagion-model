@@ -21,6 +21,8 @@ struct Loan{
     double remaining;
 
     LoanType type;
+
+    int remaining_quarters;
 };
 
 //initialises hsitorical multiperiod memory
@@ -41,7 +43,9 @@ double size_score(const Bank& borrower, const Bank& lender);
 double relationship_score(int borrower_id, int lender_id, LoanType type, const std::vector<Loan>& previous_loans);
 double combined_score(double size_score_value, double relationship_score_value);
 
-double lending_probability(double score, const Bank& lender);
+double lending_probability(double score, const Bank& lender, const Bank& borrower);
 double repayment_fraction(LoanType type);
+
+void advance_market_time(std::vector<Bank>& banks, std::vector<Loan>& loans);
 
 #endif

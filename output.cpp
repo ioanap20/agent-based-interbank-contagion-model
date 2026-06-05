@@ -136,9 +136,9 @@ void print_market_demo(const std::vector<Bank>& banksBeforeMarket, const std::ve
 
     print_separator(110);
 
-    int maxLoansToPrint = std::min(40, static_cast<int>(loans.size()));
+    size_t maxLoansToPrint = std::min(size_t(40), loans.size());
 
-    for(int i = 0; i < maxLoansToPrint; i++){
+    for(size_t i = 0; i < maxLoansToPrint; i++){
         const Loan& loan = loans[i];
 
         std::cout << std::left

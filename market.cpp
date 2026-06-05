@@ -129,7 +129,7 @@ double borrowing_gap(const Bank& bank, LoanType type){
 std::vector<int> find_lenders(const std::vector<Bank>& banks, LoanType type){
    std::vector<int> lenders;
 
-   for(int i=0; i < banks.size(); i++){
+   for(size_t i=0; i < banks.size(); i++){
       if(!banks[i].defaulted && lending_gap(banks[i], type) > 0.0){
          lenders.push_back(i);
       }
@@ -141,7 +141,7 @@ std::vector<int> find_lenders(const std::vector<Bank>& banks, LoanType type){
 std::vector<int> find_borrowers(const std::vector<Bank>& banks, LoanType type){
    std::vector<int> borrowers;
 
-   for(int i=0; i < banks.size(); i++){
+   for(size_t i=0; i < banks.size(); i++){
       if(!banks[i].defaulted && borrowing_gap(banks[i], type) > 0.0){
          borrowers.push_back(i);
       }
@@ -172,11 +172,18 @@ double combined_score(double size_score_value, double relationship_score_value){
    return 0.5 * size_score_value + 0.5 * relationship_score_value;
 }
 
-double lending_probability(double score, const Bank& lender){
+double lending_probability(double score, const Bank& lender, const Bank& borrower){
    double alpha = (lender.type == BankType::Large)? 0.4 : 1.0; //from paper
-   double beta = -1.0; //base policy tightness baseline
 
-   return 1.0 / (1.0 + alpha * std::exp(beta * score));
+   double borrower_assets = std::max(total_assets(borrower), 1.0);
+   double capital_ratio = borrower.balanceSheet.equity/borrower_assets;
+
+   double beta = -1.0;
+   if(capital_ratio<0.08){
+      beta=-3.5;
+   }
+
+   return 1.0/(1.0+alpha*std::exp(beta*score));
 }
 
 double repayment_fraction(LoanType type){
@@ -208,7 +215,6 @@ std::vector<Loan> build_interbank_market(std::vector<Bank>& banks){
    std::mt19937 gen(rd());
 
    const int max_loans_per_borrower = 3;
-   const double max_loan_amount = 50000.0;
 
    std::vector<LoanType> loan_types = {
       LoanType::Overnight, LoanType::ShortTerm, LoanType::LongTerm
@@ -268,10 +274,12 @@ std::vector<Loan> build_interbank_market(std::vector<Bank>& banks){
             double lender_willingness = lending_capacity*willingness_fraction;
 
             double roll=get_uniform_random(0.0, 1.0);
-            double p_accept = lending_probability(candidate.score, banks[lender_id]);
+            double p_accept = lending_probability(candidate.score, banks[lender_id], banks[borrower_id]);
 
             double amount = std::min(borrowing_need, lender_willingness);
             if(amount<=0.0) continue;
+
+            if(roll>p_accept) continue;
 
             Loan loan;
             loan.lender = lender_id;
@@ -280,6 +288,18 @@ std::vector<Loan> build_interbank_market(std::vector<Bank>& banks){
             loan.payment_due = amount * repayment_fraction(type);
             loan.remaining = amount - loan.payment_due;
             loan.type = type;
+
+            switch(type){
+               case LoanType::Overnight:
+                  loan.remaining_quarters=1;
+                  break;
+               case LoanType::ShortTerm:
+                  loan.remaining_quarters=2;
+                  break;
+               case LoanType::LongTerm:
+                  loan.remaining_quarters=4;
+                  break;
+            }
 
             loans.push_back(loan);
 
@@ -309,7 +329,31 @@ std::vector<Loan> build_interbank_market(std::vector<Bank>& banks){
 
 }
 
+void advance_market_time(std::vector<Bank>& banks, std::vector<Loan>& loans){
+   apply_relationship_decay(banks);
 
+   std::vector<Loan> active_loans;
+   active_loans.reserve(loans.size());
 
+   for(auto& loan:loans){
+      loan.remaining_quarters--;
 
+      if(loan.remaining_quarters>0){
+         active_loans.push_back(loan);
+      }else{
+         if(!banks[loan.borrower].defaulted && !banks[loan.lender].defaulted){
+            double settlement=loan.remaining;
 
+            banks[loan.borrower].balanceSheet.cash-=settlement;
+            banks[loan.borrower].balanceSheet.liabilities-=settlement;
+
+            banks[loan.lender].balanceSheet.cash+=settlement;
+            banks[loan.lender].balanceSheet.assets-=settlement;
+
+            update_equity(banks[loan.borrower]);
+            update_equity(banks[loan.lender]);
+         }
+      }
+   }
+   loans=std::move(active_loans);
+}
