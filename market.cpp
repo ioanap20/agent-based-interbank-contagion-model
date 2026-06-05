@@ -331,6 +331,46 @@ std::vector<Loan> build_interbank_market(std::vector<Bank>& banks){
 
 void advance_market_time(std::vector<Bank>& banks, std::vector<Loan>& loans){
    apply_relationship_decay(banks);
+LoanIndex build_loan_index(const std::vector<Loan>& loans, int num_banks){
+    LoanIndex index;
+
+    index.by_borrower.assign(num_banks, {}); // at the begining 
+    index.outgoing_payment.assign(num_banks, 0.0);
+    index.incoming_payment.assign(num_banks, 0.0);
+
+    for(int loan_idx = 0; loan_idx < loans.size(); loan_idx ++){
+        const Loan& loan = loans[loan_idx];
+        index.by_borrower[loan.borrower].push_back(loan_idx); //stores a list of loans where that bank borrowed money from
+        index.outgoing_payment[loan.borrower] += loan.payment_due; //how much that bank has to repay to others
+        index.incoming_payment[loan.lender] += loan.payment_due; // how much that bank expects back
+    }
+    return index;
+}
+
+double total_outgoing_payment(int bank_id, const std::vector<Loan>& loans){
+   double total = 0.0;
+
+   for(const Loan& loan : loans){
+      if(loan.borrower == bank_id){
+         total += loan.payment_due;
+      }
+   }
+
+   return total;
+}
+
+double total_incoming_payment(int bank_id, const std::vector<Loan>& loans){
+   double total = 0.0;
+
+   for(const Loan& loan : loans){
+      if(loan.lender == bank_id){
+         total += loan.payment_due;
+      }
+   }
+
+   return total;
+}
+
 
    std::vector<Loan> active_loans;
    active_loans.reserve(loans.size());

@@ -24,6 +24,12 @@ struct Loan{
 
     int remaining_quarters;
 };
+// we create loan_indexes to be able to viasualise the small market and to keep track of all loans and trasactions between banks
+struct LoanIndex{
+    std::vector<std::vector<int>> by_borrower;
+    std::vector<double> outgoing_payment;
+    std::vector<double> incoming_payment;
+};
 
 //initialises hsitorical multiperiod memory
 void initialize_market_memory(std::vector<Bank>& banks);
@@ -34,7 +40,7 @@ void apply_relationship_decay(std::vector<Bank>& banks);
 std::vector<Loan> build_interbank_market(std::vector<Bank>& banks);
 
 std::vector<int> find_lenders(const std::vector<Bank>& banks, LoanType type);
-std::vector<int> find_borrowers(const std::vector<Bank>& bank, LoanType type);
+std::vector<int> find_borrowers(const std::vector<Bank>& banks, LoanType type);
 
 double lending_gap(const Bank& bank, LoanType type);
 double borrowing_gap(const Bank& bank, LoanType type);
@@ -47,5 +53,9 @@ double lending_probability(double score, const Bank& lender, const Bank& borrowe
 double repayment_fraction(LoanType type);
 
 void advance_market_time(std::vector<Bank>& banks, std::vector<Loan>& loans);
+LoanIndex build_loan_index(const std::vector<Loan>& loans, int num_banks);
+
+double total_outgoing_payment(int bank_id, const std::vector<Loan>& loans);
+double total_incoming_payment(int bank_id, const std::vector<Loan>& loans);
 
 #endif

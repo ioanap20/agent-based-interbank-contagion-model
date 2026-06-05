@@ -75,9 +75,11 @@ static Bank create_random_bank(int id, std::mt19937& gen, bool largeBank){
     std::uniform_real_distribution<double> cashDistribution(5000.0, 250000.0);
 
     if(largeBank){
+        bank.balanceSheet.assets = assetDistribution(gen)*10.0;
         bank.balanceSheet.otherAssets=assetDistribution(gen)*10.0;
         bank.balanceSheet.cash=cashDistribution(gen)*10.0;
     }else{
+        bank.balanceSheet.assets = assetDistribution(gen);
         bank.balanceSheet.otherAssets=assetDistribution(gen);
         bank.balanceSheet.cash=cashDistribution(gen);
     }
