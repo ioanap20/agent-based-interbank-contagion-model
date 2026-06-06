@@ -174,7 +174,8 @@ static void run_one_experiment(const std::vector<Bank>& baseBanks, const std::ve
     {
         std::vector<Bank> warmupBanks = experimentStartBanks;
         int maxThreads = *std::max_element(threadNumbers.begin(), threadNumbers.end());
-        run_contagion_parallel(warmupBanks, cumulativeLoans, maxThreads);
+        ParallelContagionPlan warmupPlan(static_cast<int>(warmupBanks.size()), cumulativeLoans, maxThreads);
+        run_contagion_parallel_prepared(warmupBanks, cumulativeLoans, warmupPlan);
     }
 
     std::vector<Bank> sequentialBanks = experimentStartBanks;
@@ -195,11 +196,12 @@ static void run_one_experiment(const std::vector<Bank>& baseBanks, const std::ve
     for(std::size_t i = 0; i < threadNumbers.size(); i++){
         int numberOfThreads = threadNumbers[i];
         std::vector<Bank> parallelBanks = experimentStartBanks;
+        ParallelContagionPlan parallelPlan(numberOfBanks, cumulativeLoans, numberOfThreads);
 
         auto parallel_start = std::chrono::high_resolution_clock::now();
         for(int rep = 0; rep < timing_repeats; ++rep){
             reset_banks_for_contagion(parallelBanks, experimentStartBanks);
-            run_contagion_parallel(parallelBanks, cumulativeLoans, numberOfThreads);
+            run_contagion_parallel_prepared(parallelBanks, cumulativeLoans, parallelPlan);
         }
         auto parallel_end = std::chrono::high_resolution_clock::now();
 

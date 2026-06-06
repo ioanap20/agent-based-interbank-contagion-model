@@ -313,53 +313,74 @@ static void write_parallel_diagnostics(const ParallelDiagnostics& diagnostics){
     out << '\n';
 }
 
-struct RepaymentWorkspace{
-    std::vector<std::vector<int>> loans_by_lender;
-    std::vector<std::vector<int>> lenders_by_thread;
-    int active_lender_count = 0;
-    std::vector<int> loans_per_thread;
-    std::vector<double> global_incoming;
-    std::vector<double> global_credit_losses;
-    std::vector<double> local_max_diff;
+static std::vector<double> compute_nominal_liabilities(const std::vector<Loan>& loans, int numberOfBanks);
+static void compute_remaining_obligations(const std::vector<Loan>& loans,
+                                          int numberOfBanks,
+                                          std::vector<double>& remainingAssets,
+                                          std::vector<double>& remainingLiabilities);
+static int persistent_team_capacity();
 
-    void init(int threadCount, int numBanks, const std::vector<Loan>& loans){
-        loans_by_lender.assign(numBanks, {});
-        for(int loanIdx = 0; loanIdx < static_cast<int>(loans.size()); ++loanIdx){
-            loans_by_lender[loans[loanIdx].lender].push_back(loanIdx);
-        }
+ParallelContagionPlan::ParallelContagionPlan(int numberOfBanks,
+                                             const std::vector<Loan>& loans,
+                                             int numberOfThreads){
+    rebuild(numberOfBanks, loans, numberOfThreads);
+}
 
-        std::vector<int> active_lenders;
-        active_lenders.reserve(numBanks);
-        for(int lender = 0; lender < numBanks; ++lender){
-            if(!loans_by_lender[lender].empty()){
-                active_lenders.push_back(lender);
-            }
-        }
-
-        std::sort(active_lenders.begin(), active_lenders.end(), [&](int left, int right){
-            return loans_by_lender[left].size() > loans_by_lender[right].size();
-        });
-
-        active_lender_count = static_cast<int>(active_lenders.size());
-        lenders_by_thread.assign(threadCount, {});
-        loans_per_thread.assign(threadCount, 0);
-        for(int lender : active_lenders){
-            int best_thread = 0;
-            for(int t = 1; t < threadCount; ++t){
-                if(loans_per_thread[t] < loans_per_thread[best_thread]){
-                    best_thread = t;
-                }
-            }
-
-            lenders_by_thread[best_thread].push_back(lender);
-            loans_per_thread[best_thread] += static_cast<int>(loans_by_lender[lender].size());
-        }
-
-        global_incoming.assign(numBanks, 0.0);
-        global_credit_losses.assign(numBanks, 0.0);
-        local_max_diff.assign(threadCount, 0.0);
+void ParallelContagionPlan::rebuild(int numberOfBanks,
+                                    const std::vector<Loan>& loans,
+                                    int numberOfThreads){
+    num_banks = numberOfBanks;
+    threads = choose_thread_count(numberOfThreads, static_cast<int>(loans.size()));
+    if(threads > 1){
+        threads = std::min(threads, persistent_team_capacity());
     }
-};
+
+    loans_by_lender.assign(num_banks, {});
+    for(int loanIdx = 0; loanIdx < static_cast<int>(loans.size()); ++loanIdx){
+        loans_by_lender[loans[loanIdx].lender].push_back(loanIdx);
+    }
+
+    std::vector<int> active_lenders;
+    active_lenders.reserve(num_banks);
+    for(int lender = 0; lender < num_banks; ++lender){
+        if(!loans_by_lender[lender].empty()){
+            active_lenders.push_back(lender);
+        }
+    }
+
+    std::sort(active_lenders.begin(), active_lenders.end(), [&](int left, int right){
+        return loans_by_lender[left].size() > loans_by_lender[right].size();
+    });
+
+    active_lender_count = static_cast<int>(active_lenders.size());
+    lenders_by_thread.assign(threads, {});
+    loans_per_thread.assign(threads, 0);
+    for(int lender : active_lenders){
+        int best_thread = 0;
+        for(int t = 1; t < threads; ++t){
+            if(loans_per_thread[t] < loans_per_thread[best_thread]){
+                best_thread = t;
+            }
+        }
+
+        lenders_by_thread[best_thread].push_back(lender);
+        loans_per_thread[best_thread] += static_cast<int>(loans_by_lender[lender].size());
+    }
+
+    nominal_liabilities = compute_nominal_liabilities(loans, num_banks);
+    compute_remaining_obligations(loans, num_banks, remaining_assets, remaining_liabilities);
+    global_incoming.assign(num_banks, 0.0);
+    global_credit_losses.assign(num_banks, 0.0);
+    local_max_diff.assign(threads, 0.0);
+}
+
+bool ParallelContagionPlan::can_run_parallel() const{
+    return threads > 1 && num_banks > 0;
+}
+
+int ParallelContagionPlan::thread_count() const{
+    return threads;
+}
 
 class PersistentTeam{
     std::vector<std::thread> workers;
@@ -457,6 +478,10 @@ static PersistentTeam& get_persistent_team(){
     return team;
 }
 
+static int persistent_team_capacity(){
+    return get_persistent_team().capacity();
+}
+
 static void run_parallel_contagion_solver(
     std::vector<Bank>& banks,
     const std::vector<Loan>& loans,
@@ -466,7 +491,7 @@ static void run_parallel_contagion_solver(
     const std::vector<double>& remaining_liabilities,
     std::vector<double>& repayment_ratio,
     std::vector<double>& next_ratio,
-    RepaymentWorkspace& workspace,
+    ParallelContagionPlan& workspace,
     ParallelDiagnostics* diagnostics){
     const int num_banks = static_cast<int>(banks.size());
     const int max_iterations = 100;
@@ -839,12 +864,28 @@ void run_contagion_parallel(std::vector<Bank>& banks, const std::vector<Loan>& l
     }
 
     const int num_banks = static_cast<int>(banks.size());
-    int threadCount = choose_thread_count(numberOfThreads, static_cast<int>(loans.size()));
-    threadCount = std::min(threadCount, get_persistent_team().capacity());
-    if(threadCount <= 1){
+    ParallelContagionPlan plan(num_banks, loans, numberOfThreads);
+    if(!plan.can_run_parallel()){
         run_contagion(banks, loans);
         return;
     }
+
+    run_contagion_parallel_prepared(banks, loans, plan);
+}
+
+void run_contagion_parallel_prepared(
+    std::vector<Bank>& banks,
+    const std::vector<Loan>& loans,
+    ParallelContagionPlan& plan){
+    if(static_cast<int>(loans.size()) < repayment_parallel_threshold ||
+       !plan.can_run_parallel() ||
+       static_cast<int>(banks.size()) != plan.num_banks){
+        run_contagion(banks, loans);
+        return;
+    }
+
+    const int num_banks = plan.num_banks;
+    const int threadCount = plan.thread_count();
 
     ParallelDiagnostics diagnostics;
     ParallelDiagnostics* diagnostics_ptr = nullptr;
@@ -856,25 +897,13 @@ void run_contagion_parallel(std::vector<Bank>& banks, const std::vector<Loan>& l
         diagnostics.thread_count = threadCount;
     }
 
-    std::chrono::steady_clock::time_point setup_start;
-    if(diagnostics_ptr){
-        setup_start = std::chrono::steady_clock::now();
-    }
-    RepaymentWorkspace workspace;
-    workspace.init(threadCount, num_banks, loans);
-
-    const std::vector<double> nominal_liabilities = compute_nominal_liabilities(loans, num_banks);
-    std::vector<double> remaining_assets;
-    std::vector<double> remaining_liabilities;
-    compute_remaining_obligations(loans, num_banks, remaining_assets, remaining_liabilities);
     std::vector<double> repayment_ratio(num_banks, 1.0);
     std::vector<double> next_ratio(num_banks, 1.0);
     if(diagnostics_ptr){
-        diagnostics.setup_ns = elapsed_ns(setup_start, std::chrono::steady_clock::now());
-        diagnostics.active_lenders = workspace.active_lender_count;
+        diagnostics.active_lenders = plan.active_lender_count;
         for(int t = 0; t < threadCount; ++t){
-            diagnostics.lenders_per_thread[t] = static_cast<int>(workspace.lenders_by_thread[t].size());
-            diagnostics.loans_per_thread[t] = workspace.loans_per_thread[t];
+            diagnostics.lenders_per_thread[t] = static_cast<int>(plan.lenders_by_thread[t].size());
+            diagnostics.loans_per_thread[t] = plan.loans_per_thread[t];
         }
     }
 
@@ -886,12 +915,12 @@ void run_contagion_parallel(std::vector<Bank>& banks, const std::vector<Loan>& l
         banks,
         loans,
         threadCount,
-        nominal_liabilities,
-        remaining_assets,
-        remaining_liabilities,
+        plan.nominal_liabilities,
+        plan.remaining_assets,
+        plan.remaining_liabilities,
         repayment_ratio,
         next_ratio,
-        workspace,
+        plan,
         diagnostics_ptr
     );
     if(diagnostics_ptr){
