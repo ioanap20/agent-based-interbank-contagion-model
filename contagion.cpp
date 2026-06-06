@@ -375,7 +375,7 @@ void ParallelContagionPlan::rebuild(int numberOfBanks,
 }
 
 bool ParallelContagionPlan::can_run_parallel() const{
-    return threads > 1 && num_banks > 0;
+    return threads >= 1 && num_banks > 0;
 }
 
 int ParallelContagionPlan::thread_count() const{
@@ -858,7 +858,7 @@ static void apply_total_losses(std::vector<Bank>& banks, const std::vector<std::
 
 
 void run_contagion_parallel(std::vector<Bank>& banks, const std::vector<Loan>& loans, int numberOfThreads){
-    if(numberOfThreads <= 1 || static_cast<int>(loans.size()) < repayment_parallel_threshold){
+    if(numberOfThreads <= 0 || static_cast<int>(loans.size()) < repayment_parallel_threshold){
         run_contagion(banks, loans);
         return;
     }

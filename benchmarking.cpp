@@ -151,6 +151,25 @@ static void reset_banks_for_contagion(std::vector<Bank>& banks, const std::vecto
     }
 }
 
+static std::vector<int> benchmark_thread_numbers(){
+    unsigned int hardwareThreads = std::thread::hardware_concurrency();
+    int maxThreads = hardwareThreads > 0 ? static_cast<int>(hardwareThreads) : 16;
+    std::vector<int> candidates = {1, 2, 8, 12, 16, 20, 24, 28, 32};
+    std::vector<int> threadNumbers;
+
+    for(int candidate : candidates){
+        if(candidate <= maxThreads){
+            threadNumbers.push_back(candidate);
+        }
+    }
+
+    if(threadNumbers.empty() || threadNumbers.back() != maxThreads){
+        threadNumbers.push_back(maxThreads);
+    }
+
+    return threadNumbers;
+}
+
 static void run_one_experiment(const std::vector<Bank>& baseBanks, const std::vector<std::vector<Loan>>& preBuiltLoans, int numberOfBanks, double shockPercentage, const std::vector<int>& threadNumbers){
     std::vector<Bank> banks = baseBanks;
     std::vector<Loan> cumulativeLoans;
@@ -232,7 +251,7 @@ static void run_one_experiment(const std::vector<Bank>& baseBanks, const std::ve
 void run_benchmarking(){
     std::vector<int> bankNumbers = {5000, 10000};
     std::vector<double> shockPercentages = {0.20, 0.40, 0.60, 0.80};
-    std::vector<int> threadNumbers = {1, 2, 4, 8, 10};
+    std::vector<int> threadNumbers = benchmark_thread_numbers();
 
     print_benchmark_header();
 
