@@ -39,6 +39,7 @@
 #include <string>
 #include <iostream>
 #include <functional>
+#include <memory>
 
 /*struct SimpleThreadBarrier{
     std::mutex mtx;
@@ -86,6 +87,7 @@ class ParallelForPool{
         int rangeEnd = 0;
         int nextBegin = 0;
         int chunkSize = 1;
+        bool useStaticPartition = false;
 
         std::function<void(int, int, int)> currentJob;
     
@@ -103,6 +105,11 @@ class ParallelForPool{
                     int seenGeneration = 0;
 
                     while(true){
+                        bool staticPartition = false;
+                        int jobBegin = 0;
+                        int jobEnd = 0;
+                        int jobChunkSize = 1;
+
                         {
                         std::unique_lock<std::mutex> lock(mutex);
                         
@@ -117,26 +124,36 @@ class ParallelForPool{
                         }
 
                         seenGeneration = generation;
-                    }
-
-                    while(true){
-                        int begin;
-                        int end;
-                        {
-                            std::lock_guard<std::mutex> lock(mutex);
-
-                            if(nextBegin >= rangeEnd){
-                                break;
-                            }
-
-                            //each worker takes a chunk
-                            begin = nextBegin;
-                            end = std::min(rangeEnd, begin + chunkSize);
-                            nextBegin = end;
+                        staticPartition = useStaticPartition;
+                        jobBegin = rangeBegin;
+                        jobEnd = rangeEnd;
+                        jobChunkSize = chunkSize;
                         }
 
-                        // then each worker does the job
-                        currentJob(begin, end, thread_id);
+                    if(staticPartition){
+                        int begin = jobBegin + thread_id * jobChunkSize;
+                        int end = std::min(jobEnd, begin + jobChunkSize);
+                        if(begin < end){
+                            currentJob(begin, end, thread_id);
+                        }
+                    }else{
+                        while(true){
+                            int begin;
+                            int end;
+                            {
+                                std::lock_guard<std::mutex> lock(mutex);
+
+                                if(nextBegin >= jobEnd){
+                                    break;
+                                }
+
+                                begin = nextBegin;
+                                end = std::min(jobEnd, begin + jobChunkSize);
+                                nextBegin = end;
+                            }
+
+                            currentJob(begin, end, thread_id);
+                        }
                     }
                     {
                         std::lock_guard<std::mutex> lock(mutex);
@@ -175,14 +192,11 @@ class ParallelForPool{
             return workers.size();
         }
 
-        //main function that runs the loop in parallel
-        void parallel_for(int begin, int end, const std::function<void(int, int, int)>& job){
-            //check that there is work
+        void run_job(int begin, int end, const std::function<void(int, int, int)>& job, bool staticPartition){
             if(end <= begin){
                 return;
             }
 
-            //store the information
             {
                 std::lock_guard<std::mutex> lock(mutex);
 
@@ -190,55 +204,33 @@ class ParallelForPool{
                 rangeEnd = end;
                 nextBegin = begin;
 
-                int totalWork= end - begin;
+                int totalWork = end - begin;
                 int workerCount = static_cast<int>(workers.size());
                 chunkSize = std::max(1, (totalWork + workerCount - 1) / workerCount);
+                useStaticPartition = staticPartition;
 
                 currentJob = job;
-                activeWorkers = workers.size(); //all workers are active
-                generation++; //new job
+                activeWorkers = workerCount;
+                generation++;
             }
 
-            //take all the workers
             startCondition.notify_all();
             {
                 std::unique_lock<std::mutex> lock(mutex);
-
-                //the main thread waits until all workers are done
                 doneCondition.wait(lock, [&](){
                     return activeWorkers == 0;
                 });
             }
         }
+
+        void parallel_for(int begin, int end, const std::function<void(int, int, int)>& job){
+            run_job(begin, end, job, false);
+        }
+
+        void parallel_for_static(int begin, int end, const std::function<void(int, int, int)>& job){
+            run_job(begin, end, job, true);
+        }
 };
-
-//each thread produces its own losses. Will this create any difference between the seq and par alg?
-static void apply_total_losses_from_threads(std::vector<Bank>& banks, const std::vector<std::vector<std::pair<int, double>>>& local_losses){
-    std::vector<double> total_losses(banks.size(), 0.0);
-    std::vector<char> touched(banks.size(), false);
-    std::vector<int> touched_banks;
-
-    for(const auto& thread_losses : local_losses){
-        for(const auto& entry: thread_losses){
-            int bank_id = entry.first;
-            double loss = entry.second;
-
-            if(!touched[bank_id]){
-                touched[bank_id] = true;
-                touched_banks.push_back(bank_id);
-            }
-            total_losses[bank_id] += loss;
-        }
-    }
-
-    for(int bank_id : touched_banks){
-        apply_loss(banks[bank_id], total_losses[bank_id]);
-
-        if(is_insolvent(banks[bank_id])){
-            banks[bank_id].defaulted = true;
-        }
-    }
-}
 
 static int choose_thread_count(int requestedThreads, int amountOfWork){
     if(amountOfWork<=0){
@@ -251,6 +243,109 @@ static int choose_thread_count(int requestedThreads, int amountOfWork){
         requestedThreads=2;
     }
     return std::min(requestedThreads, amountOfWork);
+}
+
+static const int repayment_parallel_threshold = 10000;
+
+struct RepaymentWorkspace{
+    std::vector<std::vector<int>> loans_by_lender;
+    std::vector<double> global_incoming;
+    std::vector<double> global_credit_losses;
+    std::vector<double> local_max_diff;
+
+    void init(int threadCount, int numBanks, const std::vector<Loan>& loans){
+        loans_by_lender.assign(numBanks, {});
+        for(int loanIdx = 0; loanIdx < static_cast<int>(loans.size()); ++loanIdx){
+            loans_by_lender[loans[loanIdx].lender].push_back(loanIdx);
+        }
+
+        global_incoming.assign(numBanks, 0.0);
+        global_credit_losses.assign(numBanks, 0.0);
+        local_max_diff.assign(threadCount, 0.0);
+    }
+};
+
+static ParallelForPool& get_thread_pool(int threadCount){
+    static std::unique_ptr<ParallelForPool> pool;
+    static int pool_thread_count = 0;
+
+    if(!pool || pool_thread_count != threadCount){
+        pool = std::make_unique<ParallelForPool>(threadCount);
+        pool_thread_count = threadCount;
+    }
+
+    return *pool;
+}
+
+static void parallel_accumulate_by_lender(ParallelForPool& pool,
+                                          const std::vector<Loan>& loans,
+                                          const std::vector<double>& repaymentRatio,
+                                          RepaymentWorkspace& workspace,
+                                          bool includeCreditLosses){
+    int numBanks = static_cast<int>(workspace.global_incoming.size());
+
+    pool.parallel_for_static(0, numBanks, [&](int begin, int end, int tid){
+        (void)tid;
+        for(int lender = begin; lender < end; ++lender){
+            double incoming = 0.0;
+            double creditLosses = 0.0;
+
+            for(int loanIdx : workspace.loans_by_lender[lender]){
+                const Loan& loan = loans[loanIdx];
+                double ratio = repaymentRatio[loan.borrower];
+                double payment = loan.payment_due * ratio;
+                incoming += payment;
+                if(includeCreditLosses){
+                    creditLosses += loan.payment_due * (1.0 - ratio);
+                }
+            }
+
+            workspace.global_incoming[lender] = incoming;
+            if(includeCreditLosses){
+                workspace.global_credit_losses[lender] = creditLosses;
+            }
+        }
+    });
+}
+
+static double parallel_update_repayment_ratios(ParallelForPool& pool,
+                                                int threadCount,
+                                                std::vector<Bank>& banks,
+                                                const std::vector<double>& nominalLiabilities,
+                                                const std::vector<double>& globalIncoming,
+                                                const std::vector<double>& repaymentRatio,
+                                                std::vector<double>& nextRatio,
+                                                std::vector<double>& localMaxDiff){
+    int numBanks = static_cast<int>(banks.size());
+    nextRatio = repaymentRatio;
+
+    pool.parallel_for_static(0, numBanks, [&](int begin, int end, int tid){
+        double threadMax = 0.0;
+
+        for(int i = begin; i < end; ++i){
+            if(nominalLiabilities[i] == 0.0){
+                continue;
+            }
+
+            double availableFunds = banks[i].balanceSheet.cash + globalIncoming[i];
+            double currentRatio = std::min(1.0, availableFunds / nominalLiabilities[i]);
+
+            if(currentRatio < 0.0){
+                currentRatio = 0.0;
+            }
+
+            double difference = std::abs(currentRatio - repaymentRatio[i]);
+            if(difference > threadMax){
+                threadMax = difference;
+            }
+
+            nextRatio[i] = currentRatio;
+        }
+
+        localMaxDiff[tid] = threadMax;
+    });
+
+    return *std::max_element(localMaxDiff.begin(), localMaxDiff.begin() + threadCount);
 }
 
 static std::vector<double> compute_nominal_liabilities(const std::vector<Loan>& loans, int numberOfBanks){
@@ -293,6 +388,40 @@ static void apply_repayment_result(std::vector<Bank>& banks, const std::vector<L
             banks[i].defaulted = true;
         }
     }
+}
+
+static void apply_repayment_result_parallel(ParallelForPool& pool,
+                                            int threadCount,
+                                            std::vector<Bank>& banks,
+                                            const std::vector<Loan>& loans,
+                                            const std::vector<double>& nominalLiabilities,
+                                            const std::vector<double>& repaymentRatio,
+                                            double convergenceEpsilon,
+                                            RepaymentWorkspace& workspace){
+    (void)threadCount;
+    parallel_accumulate_by_lender(pool, loans, repaymentRatio, workspace, true);
+
+    int numBanks = static_cast<int>(banks.size());
+
+    pool.parallel_for_static(0, numBanks, [&](int begin, int end, int tid){
+        (void)tid;
+        for(int i = begin; i < end; ++i){
+            if(repaymentRatio[i] < 1.0 - convergenceEpsilon){
+                banks[i].defaulted = true;
+            }
+
+            double totalOutgoing = nominalLiabilities[i] * repaymentRatio[i];
+            banks[i].balanceSheet.cash += (workspace.global_incoming[i] - totalOutgoing);
+
+            if(workspace.global_credit_losses[i] > 0.0){
+                apply_loss(banks[i], workspace.global_credit_losses[i]);
+            }
+
+            if(is_insolvent(banks[i])){
+                banks[i].defaulted = true;
+            }
+        }
+    });
 }
 
 
@@ -340,7 +469,7 @@ static std::vector<int> find_next_frontier(std::vector<Bank>& banks, const LoanI
 
         if(banks[i].defaulted){
             next_frontier.push_back(i);
-            continue;;
+            continue;
         }
 
         double outgoing_payment = loan_index.outgoing_payment[i];
@@ -450,172 +579,58 @@ static void apply_total_losses(std::vector<Bank>& banks, const std::vector<std::
 }
 
 
-static void propagate_losses_from_frontier_parallel(std::vector<Bank>& banks, const std::vector<Loan>& loans, const LoanIndex& loan_index, const std::vector<int>& frontier, int numberOfThreads, ParallelForPool& pool){
-
-    int numberOfActiveLoans = 0;
-
-    for(int bank_id : frontier){
-        numberOfActiveLoans += loan_index.by_borrower[bank_id].size(); // how many active loans are affected
-    }
-
-    if(numberOfActiveLoans == 0) return;
-
-    std::vector<int> active_loans;
-    active_loans.reserve(numberOfActiveLoans);
-
-    for(int bank_id : frontier){
-        for(int loan_idx : loan_index.by_borrower[bank_id]){
-            active_loans.push_back(loan_idx);
-        }
-    }
-
-    const int parallel_threshold = 2000; //check whether we need to do parallelisation or not
-
-    if(numberOfActiveLoans < parallel_threshold){
-        std::vector<std::pair<int, double>> losses;
-        losses.reserve(active_loans.size());
-
-        for(int loan_idx : active_loans){
-            const Loan& loan = loans[loan_idx];
-            double loss = (1.0 - recovery_rate) * loan.payment_due;
-            losses.push_back({loan.lender, loss});
-        }
-        apply_total_losses(banks, losses);
+void run_contagion_parallel(std::vector<Bank>& banks, const std::vector<Loan>& loans, int numberOfThreads){
+    if(static_cast<int>(loans.size()) < repayment_parallel_threshold){
+        run_contagion(banks, loans);
         return;
     }
 
-    int threadCount = pool.size();
+    int num_banks = static_cast<int>(banks.size());
+    int threadCount = choose_thread_count(numberOfThreads, static_cast<int>(loans.size()));
 
-    std::vector<std::vector<std::pair<int, double>>> local_losses(threadCount); // one local loss vector per thread
+    ParallelForPool& pool = get_thread_pool(threadCount);
 
-    for(int thread_id = 0; thread_id < threadCount; thread_id++){
-        local_losses[thread_id].reserve(numberOfActiveLoans / threadCount + 1);
-    }
-
-    pool.parallel_for(0, numberOfActiveLoans, [&](int begin, int end, int thread_id){
-        for(int i=begin; i<end; i++){
-            int loan_idx = active_loans[i];
-            const Loan& loan = loans[loan_idx];
-
-            double loss = (1.0 - recovery_rate) * loan.payment_due;
-
-            local_losses[thread_id].push_back({loan.lender, loss});
-        }
-    });
-    apply_total_losses_from_threads(banks, local_losses);
-}
-
-//scan all banks and find which ones should be in the next frontier
-static std::vector<int> find_next_frontier_parallel(std::vector<Bank>& banks, const LoanIndex& loan_index, const std::vector<char>& already_propagated, int numberOfThreads, ParallelForPool& pool){
-    const int bank_parallel_threshold = 10000;
-
-    if(banks.size() < bank_parallel_threshold) return find_next_frontier(banks, loan_index, already_propagated);
-
-    int threadCount = pool.size();
-
-    std::vector<std::vector<int>> local_frontiers(threadCount);
-
-    for(int thread_id = 0; thread_id < threadCount; thread_id++){
-        local_frontiers[thread_id].reserve(banks.size() / threadCount + 1);
-    }
-
-    pool.parallel_for(0, banks.size(), [&](int begin, int end, int thread_id){
-        for(int bank_id = begin; bank_id < end; bank_id ++){
-            if(already_propagated[bank_id]) continue;
-
-            if(banks[bank_id].defaulted){
-                local_frontiers[thread_id].push_back(bank_id);
-                continue;
-            }
-
-            double outgoing_payment = loan_index.outgoing_payment[bank_id];
-            double incoming_payment = loan_index.incoming_payment[bank_id];
-
-            bool insolvent = is_insolvent(banks[bank_id]);
-            bool illiquid = is_illiquid(banks[bank_id], outgoing_payment, incoming_payment);
-
-            if(insolvent || illiquid){
-                banks[bank_id].defaulted = true;
-                local_frontiers[thread_id].push_back(bank_id);
-            }
-        }
-    });
-
-    std::vector<int> next_frontier;
-
-    for(int thread_id = 0; thread_id < threadCount; thread_id ++){
-        for(int bank_id : local_frontiers[thread_id]){
-            next_frontier.push_back(bank_id);
-        }
-    }
-    return next_frontier;
-}
-
-void run_contagion_parallel(std::vector<Bank>& banks, const std::vector<Loan>& loans, int numberOfThreads){
-    int num_banks=static_cast<int>(banks.size());
-    int threadCount=choose_thread_count(numberOfThreads, static_cast<int>(loans.size()));
-
-    ParallelForPool pool(threadCount);
+    RepaymentWorkspace workspace;
+    workspace.init(threadCount, num_banks, loans);
 
     std::vector<double> nominal_liabilities = compute_nominal_liabilities(loans, num_banks);
-
     std::vector<double> repayment_ratio(num_banks, 1.0);
+    std::vector<double> next_ratio(num_banks, 1.0);
 
-    const int max_iterations=100;
-    const double convergence_epsilon=1e-6;
+    const int max_iterations = 100;
+    const double convergence_epsilon = 1e-6;
 
-    std::vector<std::vector<double>> local_incoming(threadCount, std::vector<double>(num_banks, 0.0));
-    std::vector<double> global_incoming_payments(num_banks,0.0);
-    bool global_converged = false;
+    for(int iteration = 0; iteration < max_iterations; ++iteration){
+        parallel_accumulate_by_lender(pool, loans, repayment_ratio, workspace, false);
 
-    std::vector<std::thread> workers;
-    
-    for(int iteration = 0; iteration < max_iterations; iteration ++){
-        for(int threadId = 0; threadId < threadCount; threadId++){
-            std::fill(local_incoming[threadId].begin(), local_incoming[threadId].end(), 0.0);
+        double max_difference = parallel_update_repayment_ratios(
+            pool,
+            threadCount,
+            banks,
+            nominal_liabilities,
+            workspace.global_incoming,
+            repayment_ratio,
+            next_ratio,
+            workspace.local_max_diff
+        );
+
+        repayment_ratio.swap(next_ratio);
+
+        if(max_difference < convergence_epsilon){
+            break;
         }
-        pool.parallel_for(0, loans.size(), [&](int begin, int end, int threadId){
-                for(int loanIndex = begin; loanIndex < end; loanIndex ++){
-                    const Loan& loan = loans[loanIndex];
-
-                    local_incoming[threadId][loan.lender]+=loan.payment_due*repayment_ratio[loan.borrower];
-                }
-            });
-        std::fill(global_incoming_payments.begin(), global_incoming_payments.end(), 0.0);
-
-    for(int t=0; t<threadCount; ++t){
-            for(int i=0; i<num_banks; i++){
-                global_incoming_payments[i]+=local_incoming[t][i];
-            }
     }
 
-    std::vector<double> next_ratio=repayment_ratio;
-    double max_difference=0.0;
-
-    for(int i=0; i<num_banks; ++i){
-            if(nominal_liabilities[i]==0.0) continue;
-
-            double available_funds=banks[i].balanceSheet.cash+global_incoming_payments[i];
-            double current_ratio=std::min(1.0, available_funds/nominal_liabilities[i]);
-            
-            if(current_ratio<0.0) current_ratio=0.0;
-
-            double difference=std::abs(current_ratio-repayment_ratio[i]);
-            if(difference>max_difference){
-                max_difference=difference;
-            }
-            
-            next_ratio[i]=current_ratio;
-    }
-
-    repayment_ratio=next_ratio;
-
-    if(max_difference<convergence_epsilon){
-                break;
-    }
-}
-
-    apply_repayment_result(banks, loans, nominal_liabilities, repayment_ratio, convergence_epsilon);
+    apply_repayment_result_parallel(
+        pool,
+        threadCount,
+        banks,
+        loans,
+        nominal_liabilities,
+        repayment_ratio,
+        convergence_epsilon,
+        workspace
+    );
 }
 
 

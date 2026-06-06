@@ -41,4 +41,6 @@ else{
     return 0;
 }
 
-// CHECK BRANCH PUSH NADIA
+/* clang++ -std=c++17 -O3 -march=native -DNDEBUG -pthread \              
+main.cpp benchmarking.cpp banks.cpp market.cpp shock.cpp contagion.cpp output.cpp small_market.cpp \
+-o contagion*/

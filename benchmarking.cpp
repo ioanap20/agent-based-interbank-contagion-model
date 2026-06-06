@@ -218,9 +218,9 @@ static void run_one_experiment(const std::vector<Bank>& baseBanks, const std::ve
 
 
 void run_benchmarking(){
-    std::vector<int> bankNumbers = {5000, 10000, 20000, 50000};
+    std::vector<int> bankNumbers = {20000};
     std::vector<double> shockPercentages = {0.20, 0.40, 0.60, 0.80};
-    std::vector<int> threadNumbers = {2, 4, 8, 10};
+    std::vector<int> threadNumbers = {1, 2, 4, 8, 10};
 
     print_benchmark_header();
 
