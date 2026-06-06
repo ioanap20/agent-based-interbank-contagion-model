@@ -68,6 +68,12 @@
  }
 
 void apply_random_bank_shock(std::vector<Bank>& banks, int number_of_banks, double shock_percentage) {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    apply_random_bank_shock(banks, number_of_banks, shock_percentage, gen);
+}
+
+void apply_random_bank_shock(std::vector<Bank>& banks, int number_of_banks, double shock_percentage, std::mt19937& gen) {
     //check percentage is within the correct range
     if (shock_percentage < 0.0 || shock_percentage > 1.0) return;
 
@@ -81,9 +87,7 @@ void apply_random_bank_shock(std::vector<Bank>& banks, int number_of_banks, doub
     }
 
     //shuffle indices
-    std::random_device rd;
-    std::mt19937 g(rd());
-    std::shuffle(active_indices.begin(), active_indices.end(), g);
+    std::shuffle(active_indices.begin(), active_indices.end(), gen);
 
     //set safe bounds
     int target_count = std::min(number_of_banks, static_cast<int>(active_indices.size()));
@@ -102,4 +106,4 @@ void apply_random_bank_shock(std::vector<Bank>& banks, int number_of_banks, doub
             bank.defaulted = true;
         }
     }
- }
+}

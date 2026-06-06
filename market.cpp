@@ -27,11 +27,15 @@
 #include <cmath>
 
 // Uniform distribution function
+static double get_uniform_random(double lower_bound, double upper_bound, std::mt19937& gen) {
+   std::uniform_real_distribution<double> dis(lower_bound, upper_bound);
+   return dis(gen);
+}
+
 static double get_uniform_random(double lower_bound, double upper_bound) {
    static std::random_device rd;
    static std::mt19937 gen(rd());
-   std::uniform_real_distribution<double> dis(lower_bound, upper_bound);
-   return dis(gen);
+   return get_uniform_random(lower_bound, upper_bound, gen);
 }
 
 static int loan_type_index(LoanType type){
@@ -186,16 +190,22 @@ double lending_probability(double score, const Bank& lender, const Bank& borrowe
 }
 
 double repayment_fraction(LoanType type){
+   static std::random_device rd;
+   static std::mt19937 gen(rd());
+   return repayment_fraction(type, gen);
+}
+
+double repayment_fraction(LoanType type, std::mt19937& gen){
    switch (type)
    {
    case LoanType::Overnight:
       return 1.0;
    
    case LoanType::ShortTerm:
-      return get_uniform_random(0.99, 1.00);
+      return get_uniform_random(0.99, 1.00, gen);
    
    case LoanType::LongTerm:
-      return get_uniform_random(0.25, 1.00);
+      return get_uniform_random(0.25, 1.00, gen);
    }
    return 1.0;
 }
@@ -208,10 +218,13 @@ struct PriorityCandidate {
 };
 
 std::vector<Loan> build_interbank_market(std::vector<Bank>& banks, const MarketConfig& config){
-   std::vector<Loan> loans;
-
    std::random_device rd;
    std::mt19937 gen(rd());
+   return build_interbank_market(banks, gen, config);
+}
+
+std::vector<Loan> build_interbank_market(std::vector<Bank>& banks, std::mt19937& gen, const MarketConfig& config){
+   std::vector<Loan> loans;
 
    const int max_loans_per_borrower = config.max_loans_per_borrower;
    const double max_loan_amount = config.max_loan_amount;
@@ -277,10 +290,10 @@ std::vector<Loan> build_interbank_market(std::vector<Bank>& banks, const MarketC
             double lending_capacity = lending_gap(banks[lender_id], type) - lent_so_far[lender_id];
             if(lending_capacity<=0.0) continue;
 
-            double willingness_fraction = get_uniform_random(0.85, 1.0);
+            double willingness_fraction = get_uniform_random(0.85, 1.0, gen);
             double lender_willingness = lending_capacity*willingness_fraction;
 
-            double roll=get_uniform_random(0.0, 1.0);
+            double roll=get_uniform_random(0.0, 1.0, gen);
             double p_accept = lending_probability(candidate.score, banks[lender_id], banks[borrower_id]);
 
             if(roll > p_accept) continue;
@@ -297,7 +310,7 @@ std::vector<Loan> build_interbank_market(std::vector<Bank>& banks, const MarketC
             loan.borrower = borrower_id;
             loan.amount = amount;
 
-            loan.payment_due = amount * repayment_fraction(type);
+            loan.payment_due = amount * repayment_fraction(type, gen);
 
             loan.remaining = amount - loan.payment_due;
 

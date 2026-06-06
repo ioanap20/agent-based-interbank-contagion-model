@@ -4,6 +4,7 @@
 #define MARKET_HPP
 
 #include <vector>
+#include <random>
 #include "banks.hpp"
 
 enum class LoanType{
@@ -46,6 +47,7 @@ void initialize_market_memory(std::vector<Bank>& banks);
 void apply_relationship_decay(std::vector<Bank>& banks);
 
 std::vector<Loan> build_interbank_market(std::vector<Bank>& banks, const MarketConfig& config = MarketConfig{});
+std::vector<Loan> build_interbank_market(std::vector<Bank>& banks, std::mt19937& gen, const MarketConfig& config = MarketConfig{});
 
 std::vector<int> find_lenders(const std::vector<Bank>& banks, LoanType type);
 std::vector<int> find_borrowers(const std::vector<Bank>& banks, LoanType type);
@@ -59,6 +61,7 @@ double combined_score(double size_score_value, double relationship_score_value);
 
 double lending_probability(double score, const Bank& lender, const Bank& borrower);
 double repayment_fraction(LoanType type);
+double repayment_fraction(LoanType type, std::mt19937& gen);
 
 void advance_market_time(std::vector<Bank>& banks, std::vector<Loan>& loans);
 LoanIndex build_loan_index(const std::vector<Loan>& loans, int num_banks);

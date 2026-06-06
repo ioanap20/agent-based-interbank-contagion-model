@@ -21,8 +21,13 @@
 
 #include <iostream>
 #include <string>
+#include <cstdlib>
 
 void run_benchmarking();
+void run_seeded_experiment(int numberOfBanks,
+                           int numberOfThreads,
+                           const std::string& seedsPath,
+                           const std::string& resultsPath);
 
 int main(int argc, char* argv[]){
     if(argc > 1 && std::string(argv[1]) == "benchmark"){
@@ -31,6 +36,21 @@ int main(int argc, char* argv[]){
         run_benchmarking();
 
         std::cout << "Benchmark finished" << std::endl;
+    }
+    else if(argc > 3 && std::string(argv[1]) == "seeded"){
+        int numberOfBanks = std::atoi(argv[2]);
+        int numberOfThreads = std::atoi(argv[3]);
+        std::string seedsPath = argc > 4 ? argv[4] : "experiment_seeds.json";
+        std::string resultsPath = argc > 5 ? argv[5] : "seeded_results.json";
+
+        if(numberOfBanks <= 0 || numberOfThreads <= 0){
+            std::cerr << "Usage: ./contagion seeded <number_of_banks> <number_of_threads> [seeds.json] [results.json]" << std::endl;
+            return 1;
+        }
+
+        std::cout << "Running seeded experiment" << std::endl;
+        run_seeded_experiment(numberOfBanks, numberOfThreads, seedsPath, resultsPath);
+        std::cout << "Seeded experiment finished" << std::endl;
     }
     else if(argc > 1 && std::string(argv[1]) == "demo-random"){
         std::cout << "Running random small market demo" << std::endl;

@@ -31,6 +31,10 @@
 #include <iomanip>
 #include <algorithm>
 #include <thread>
+#include <fstream>
+#include <sstream>
+#include <cstdint>
+#include <iterator>
 
 struct BenchmarkResult{
     int numberOfBanks;
@@ -120,13 +124,18 @@ static Bank create_random_bank(int id, std::mt19937& gen, bool largeBank){
     return bank;
 }
 
+std::vector<Bank> generate_banks(int numberOfBanks, std::mt19937& gen);
+
 std::vector<Bank> generate_banks(int numberOfBanks){
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    return generate_banks(numberOfBanks, gen);
+}
+
+std::vector<Bank> generate_banks(int numberOfBanks, std::mt19937& gen){
     std::vector<Bank> banks;
 
     banks.reserve(numberOfBanks);
-
-    std::random_device rd;
-    std::mt19937 gen(rd());
 
     int numberOfLargeBanks = std::max(1, numberOfBanks / 20);
 
@@ -168,6 +177,78 @@ static std::vector<int> benchmark_thread_numbers(){
     }
 
     return threadNumbers;
+}
+
+static std::vector<std::uint32_t> default_experiment_seeds(){
+    return {
+        104729u,
+        130363u,
+        15485863u,
+        32452843u,
+        49979687u,
+        67867967u,
+        86028121u,
+        104395303u,
+        122949829u,
+        141650939u
+    };
+}
+
+static void write_seed_file(const std::string& path, const std::vector<std::uint32_t>& seeds){
+    std::ofstream out(path);
+    out << "{\n  \"seeds\": [";
+    for(std::size_t i = 0; i < seeds.size(); ++i){
+        if(i > 0){
+            out << ", ";
+        }
+        out << seeds[i];
+    }
+    out << "]\n}\n";
+}
+
+static std::vector<std::uint32_t> read_seed_file(const std::string& path){
+    std::ifstream in(path);
+    if(!in){
+        std::vector<std::uint32_t> seeds = default_experiment_seeds();
+        write_seed_file(path, seeds);
+        return seeds;
+    }
+
+    std::string contents((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    for(char& ch : contents){
+        if(ch < '0' || ch > '9'){
+            ch = ' ';
+        }
+    }
+
+    std::vector<std::uint32_t> seeds;
+    std::stringstream parser(contents);
+    unsigned long value = 0;
+    while(parser >> value && seeds.size() < 10){
+        seeds.push_back(static_cast<std::uint32_t>(value));
+    }
+
+    if(seeds.size() != 10){
+        seeds = default_experiment_seeds();
+        write_seed_file(path, seeds);
+    }
+
+    return seeds;
+}
+
+static std::uint32_t derive_shock_seed(std::uint32_t seed, std::size_t shockIndex){
+    return seed ^ static_cast<std::uint32_t>(0x9e3779b9u + 1000003u * static_cast<std::uint32_t>(shockIndex + 1));
+}
+
+static std::vector<std::vector<Loan>> build_seeded_quarter_loans(std::vector<Bank>& generationBanks, std::mt19937& gen){
+    std::vector<std::vector<Loan>> preBuiltLoans(4);
+
+    for(int q = 0; q < 4; ++q){
+        preBuiltLoans[q] = build_interbank_market(generationBanks, gen);
+        apply_relationship_decay(generationBanks);
+    }
+
+    return preBuiltLoans;
 }
 
 static void run_one_experiment(const std::vector<Bank>& baseBanks, const std::vector<std::vector<Loan>>& preBuiltLoans, int numberOfBanks, double shockPercentage, const std::vector<int>& threadNumbers){
@@ -245,6 +326,138 @@ static void run_one_experiment(const std::vector<Bank>& baseBanks, const std::ve
             speedup
         );
     }
+}
+
+static void prepare_contagion_start(const std::vector<Bank>& baseBanks,
+                                    const std::vector<std::vector<Loan>>& preBuiltLoans,
+                                    int numberOfBanks,
+                                    double shockPercentage,
+                                    std::uint32_t shockSeed,
+                                    std::vector<Bank>& experimentStartBanks,
+                                    std::vector<Loan>& cumulativeLoans){
+    std::vector<Bank> banks = baseBanks;
+    cumulativeLoans.clear();
+    std::mt19937 shockGen(shockSeed);
+
+    for(int q = 0; q < 4; ++q){
+        const std::vector<Loan>& quarterLoans = preBuiltLoans[q];
+        cumulativeLoans.insert(cumulativeLoans.end(), quarterLoans.begin(), quarterLoans.end());
+
+        if(q == 0){
+            apply_random_bank_shock(banks, std::max(1, numberOfBanks / 20), shockPercentage, shockGen);
+        }
+
+        advance_market_time(banks, cumulativeLoans);
+    }
+
+    experimentStartBanks = banks;
+}
+
+void run_seeded_experiment(int numberOfBanks,
+                           int numberOfThreads,
+                           const std::string& seedsPath,
+                           const std::string& resultsPath){
+    const std::vector<std::uint32_t> seeds = read_seed_file(seedsPath);
+    write_seed_file(seedsPath, seeds);
+    const std::vector<double> shockPercentages = {0.20, 0.40, 0.60, 0.80};
+    const int timingRepeats = 64;
+
+    std::ofstream out(resultsPath);
+    if(!out){
+        std::cerr << "Could not write results JSON: " << resultsPath << std::endl;
+        return;
+    }
+
+    out << "{\n";
+    out << "  \"number_of_banks\": " << numberOfBanks << ",\n";
+    out << "  \"number_of_threads\": " << numberOfThreads << ",\n";
+    out << "  \"timing_repeats\": " << timingRepeats << ",\n";
+    out << "  \"seeds_file\": \"" << seedsPath << "\",\n";
+    out << "  \"seeds\": [";
+    for(std::size_t i = 0; i < seeds.size(); ++i){
+        if(i > 0){
+            out << ", ";
+        }
+        out << seeds[i];
+    }
+    out << "],\n";
+    out << "  \"results\": [\n";
+
+    bool firstResult = true;
+    for(std::size_t seedIndex = 0; seedIndex < seeds.size(); ++seedIndex){
+        const std::uint32_t seed = seeds[seedIndex];
+        std::mt19937 gen(seed);
+        std::vector<Bank> baseBanks = generate_banks(numberOfBanks, gen);
+        std::vector<Bank> generationBanks = baseBanks;
+        std::vector<std::vector<Loan>> preBuiltLoans = build_seeded_quarter_loans(generationBanks, gen);
+
+        for(std::size_t shockIndex = 0; shockIndex < shockPercentages.size(); ++shockIndex){
+            const double shockPercentage = shockPercentages[shockIndex];
+            const std::uint32_t shockSeed = derive_shock_seed(seed, shockIndex);
+            std::vector<Bank> experimentStartBanks;
+            std::vector<Loan> cumulativeLoans;
+            prepare_contagion_start(
+                baseBanks,
+                preBuiltLoans,
+                numberOfBanks,
+                shockPercentage,
+                shockSeed,
+                experimentStartBanks,
+                cumulativeLoans
+            );
+
+            std::vector<Bank> sequentialBanks = experimentStartBanks;
+            auto sequentialStart = std::chrono::high_resolution_clock::now();
+            for(int rep = 0; rep < timingRepeats; ++rep){
+                reset_banks_for_contagion(sequentialBanks, experimentStartBanks);
+                run_contagion(sequentialBanks, cumulativeLoans);
+            }
+            auto sequentialEnd = std::chrono::high_resolution_clock::now();
+            const double sequentialTimeMs = std::chrono::duration<double, std::milli>(
+                sequentialEnd - sequentialStart
+            ).count();
+            const int sequentialDefaults = count_defaulted_banks(sequentialBanks);
+
+            std::vector<Bank> parallelBanks = experimentStartBanks;
+            ParallelContagionPlan parallelPlan(numberOfBanks, cumulativeLoans, numberOfThreads);
+            auto parallelStart = std::chrono::high_resolution_clock::now();
+            for(int rep = 0; rep < timingRepeats; ++rep){
+                reset_banks_for_contagion(parallelBanks, experimentStartBanks);
+                run_contagion_parallel_prepared(parallelBanks, cumulativeLoans, parallelPlan);
+            }
+            auto parallelEnd = std::chrono::high_resolution_clock::now();
+            const double parallelTimeMs = std::chrono::duration<double, std::milli>(
+                parallelEnd - parallelStart
+            ).count();
+            const int parallelDefaults = count_defaulted_banks(parallelBanks);
+            const double speedup = parallelTimeMs > 0.0 ? sequentialTimeMs / parallelTimeMs : 0.0;
+
+            if(!firstResult){
+                out << ",\n";
+            }
+            firstResult = false;
+
+            out << "    {\n";
+            out << "      \"seed\": " << seed << ",\n";
+            out << "      \"shock_seed\": " << shockSeed << ",\n";
+            out << "      \"shock_percentage\": " << std::fixed << std::setprecision(2) << shockPercentage << ",\n";
+            out << "      \"effective_threads\": " << parallelPlan.thread_count() << ",\n";
+            out << "      \"number_of_loans\": " << cumulativeLoans.size() << ",\n";
+            out << "      \"sequential_defaults\": " << sequentialDefaults << ",\n";
+            out << "      \"parallel_defaults\": " << parallelDefaults << ",\n";
+            out << "      \"sequential_time_ms\": " << std::fixed << std::setprecision(6) << sequentialTimeMs << ",\n";
+            out << "      \"parallel_time_ms\": " << std::fixed << std::setprecision(6) << parallelTimeMs << ",\n";
+            out << "      \"speedup\": " << std::fixed << std::setprecision(6) << speedup << ",\n";
+            out << "      \"check\": \"" << (sequentialDefaults == parallelDefaults ? "OK" : "DIFF") << "\"\n";
+            out << "    }";
+        }
+    }
+
+    out << "\n  ]\n";
+    out << "}\n";
+
+    std::cout << "Seeded experiment results written to " << resultsPath << std::endl;
+    std::cout << "Seeds written/read from " << seedsPath << std::endl;
 }
 
 
