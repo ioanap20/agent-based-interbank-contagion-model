@@ -298,6 +298,43 @@ void print_final_bank_states(const std::vector<Bank>& banks){
     std::cout << "===================================================" << std::endl;
 }
 
+void print_quarter_header(int quarter, int totalLoans){
+    std::cout << std::endl;
+    std::cout << "================ QUARTER " << quarter << " ================" << std::endl;
+    std::cout << "Cumulative loans in the system: " << totalLoans << std::endl;
+    std::cout << "====================================================" << std::endl;
+}
+
+void print_quarter_summary(int quarter, const std::vector<Bank>& banks){
+    std::cout << std::endl;
+    std::cout << "Quarter " << quarter << " summary: "
+              << count_defaulted_banks_output(banks)
+              << " / "
+              << banks.size()
+              << " banks defaulted"
+              << std::endl;
+}
+
+void print_cumulative_defaults(int defaulted, int total){
+    std::cout << "Cumulative defaults: " << defaulted << " / " << total
+              << " (" << std::fixed << std::setprecision(1)
+              << (100.0 * defaulted / std::max(total, 1)) << "%)"
+              << std::endl;
+}
+
+void print_demo_shock_message(const std::vector<int>& shockedBanks, double shockPercentage){
+    std::cout << std::endl;
+    std::cout << "================ EXTREME DEMO SHOCK ================" << std::endl;
+    std::cout << "Shock size: " << shockPercentage * 100.0 << "% of assets" << std::endl;
+    std::cout << "Shocked banks (top borrowers + core lender): ";
+    for(int bankId : shockedBanks){
+        std::cout << bankId << " ";
+    }
+    std::cout << std::endl;
+    std::cout << "These banks are forced into default to seed the cascade." << std::endl;
+    std::cout << "====================================================" << std::endl;
+}
+
 void print_frontier_small(const std::vector<int>& frontier){
     std::cout<<"Banks defaulting this round: ";
 

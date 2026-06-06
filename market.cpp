@@ -207,21 +207,21 @@ struct PriorityCandidate {
    double rel_history;
 };
 
-std::vector<Loan> build_interbank_market(std::vector<Bank>& banks){
+std::vector<Loan> build_interbank_market(std::vector<Bank>& banks, const MarketConfig& config){
    std::vector<Loan> loans;
 
    std::random_device rd;
    std::mt19937 gen(rd());
 
-   const int max_loans_per_borrower = 8;
-   const double max_loan_amount = 100000.0;
+   const int max_loans_per_borrower = config.max_loans_per_borrower;
+   const double max_loan_amount = config.max_loan_amount;
 
    // Prevents one lender from giving away almost all its cash in one loan
-   const double max_fraction_of_lender_cash = 0.90;
+   const double max_fraction_of_lender_cash = config.max_fraction_of_lender_cash;
 
-   const double max_fraction_of_lender_equity = 6.00;
+   const double max_fraction_of_lender_equity = config.max_fraction_of_lender_equity;
 
-   double min_loan_amount = 5000.0;
+   double min_loan_amount = config.min_loan_amount;
 
    std::vector<LoanType> loan_types = {
       LoanType::Overnight, LoanType::ShortTerm, LoanType::LongTerm

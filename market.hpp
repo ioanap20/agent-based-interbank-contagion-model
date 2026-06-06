@@ -31,13 +31,21 @@ struct LoanIndex{
     std::vector<double> incoming_payment;
 };
 
+struct MarketConfig{
+    int max_loans_per_borrower = 6;
+    double max_loan_amount = 100000.0;
+    double max_fraction_of_lender_cash = 0.65;
+    double max_fraction_of_lender_equity = 3.50;
+    double min_loan_amount = 5000.0;
+};
+
 //initialises hsitorical multiperiod memory
 void initialize_market_memory(std::vector<Bank>& banks);
 
 //end of period routine to decay elemtns
 void apply_relationship_decay(std::vector<Bank>& banks);
 
-std::vector<Loan> build_interbank_market(std::vector<Bank>& banks);
+std::vector<Loan> build_interbank_market(std::vector<Bank>& banks, const MarketConfig& config = MarketConfig{});
 
 std::vector<int> find_lenders(const std::vector<Bank>& banks, LoanType type);
 std::vector<int> find_borrowers(const std::vector<Bank>& banks, LoanType type);

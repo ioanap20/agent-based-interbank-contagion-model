@@ -26,17 +26,22 @@ void run_benchmarking();
 
 int main(int argc, char* argv[]){
     if(argc > 1 && std::string(argv[1]) == "benchmark"){
-    std::cout<<"Running interbank contagion benchmark" << std::endl;
+        std::cout<<"Running interbank contagion benchmark" << std::endl;
 
-    run_benchmarking();
+        run_benchmarking();
 
-    std::cout << "Benchmark finished" << std::endl;
-}
-else{
-    std::cout << "Running small visual market demo" << std::endl;
-    run_random_small_market_visualization();
-    std::cout << "Demo finished" << std::endl;
-}
+        std::cout << "Benchmark finished" << std::endl;
+    }
+    else if(argc > 1 && std::string(argv[1]) == "demo-random"){
+        std::cout << "Running random small market demo" << std::endl;
+        run_random_small_market_visualization();
+        std::cout << "Demo finished" << std::endl;
+    }
+    else{
+        std::cout << "Running extreme multi-quarter demo" << std::endl;
+        run_extreme_small_market_visualization();
+        std::cout << "Demo finished" << std::endl;
+    }
 
     return 0;
 }

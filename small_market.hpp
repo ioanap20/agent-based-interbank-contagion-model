@@ -3,5 +3,6 @@
 
 void run_small_market_visualization();
 void run_random_small_market_visualization();
+void run_extreme_small_market_visualization();
 
 #endif

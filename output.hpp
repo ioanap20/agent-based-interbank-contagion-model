@@ -32,6 +32,14 @@ void print_external_shock_message(int shockedBank);
 
 void print_final_bank_states(const std::vector<Bank>& banks);
 
+void print_quarter_header(int quarter, int totalLoans);
+
+void print_quarter_summary(int quarter, const std::vector<Bank>& banks);
+
+void print_cumulative_defaults(int defaulted, int total);
+
+void print_demo_shock_message(const std::vector<int>& shockedBanks, double shockPercentage);
+
 #endif
 
                     
