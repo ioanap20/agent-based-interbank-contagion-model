@@ -299,8 +299,7 @@ std::vector<Loan> build_interbank_market(std::vector<Bank>& banks, const MarketC
 
             loan.payment_due = amount * repayment_fraction(type);
 
-            //loan.remaining = amount - loan.payment_due;
-            loan.remaining = 0.0;
+            loan.remaining = amount - loan.payment_due;
 
             loan.type = type;
 
@@ -390,18 +389,43 @@ void advance_market_time(std::vector<Bank>& banks, std::vector<Loan>& loans){
       if(loan.remaining_quarters>0){
          active_loans.push_back(loan);
       }else{
-         if(!banks[loan.borrower].defaulted && !banks[loan.lender].defaulted){
-            double settlement=loan.remaining;
+         double settlement=loan.remaining;
 
-            banks[loan.borrower].balanceSheet.cash-=settlement;
-            banks[loan.borrower].balanceSheet.liabilities-=settlement;
-
-            banks[loan.lender].balanceSheet.cash+=settlement;
-            banks[loan.lender].balanceSheet.assets-=settlement;
-
-            update_equity(banks[loan.borrower]);
-            update_equity(banks[loan.lender]);
+         if(settlement<=0.0){
+            continue;
          }
+
+         if(banks[loan.lender].defaulted){
+            continue;
+         }
+
+         if(banks[loan.borrower].defaulted){
+            apply_loss(banks[loan.lender], settlement);
+            continue;
+         }
+
+         double payment=std::min(settlement, std::max(0.0, banks[loan.borrower].balanceSheet.cash));
+         double unpaid=settlement-payment;
+
+         banks[loan.borrower].balanceSheet.cash-=payment;
+         banks[loan.borrower].balanceSheet.liabilities-=settlement;
+         if(banks[loan.borrower].balanceSheet.liabilities<0.0){
+            banks[loan.borrower].balanceSheet.liabilities=0.0;
+         }
+
+         banks[loan.lender].balanceSheet.cash+=payment;
+         banks[loan.lender].balanceSheet.assets-=payment;
+         if(banks[loan.lender].balanceSheet.assets<0.0){
+            banks[loan.lender].balanceSheet.assets=0.0;
+         }
+
+         if(unpaid>0.0){
+            banks[loan.borrower].defaulted=true;
+            apply_loss(banks[loan.lender], unpaid);
+         }
+
+         update_equity(banks[loan.borrower]);
+         update_equity(banks[loan.lender]);
       }
    }
    loans=std::move(active_loans);

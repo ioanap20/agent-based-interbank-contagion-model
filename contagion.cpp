@@ -71,11 +71,43 @@
 static const double recovery_rate = 0.40;
 
 static double loan_incoming_payment(double payment_due, double repayment_ratio){
-    return payment_due * (repayment_ratio + (1.0 - repayment_ratio) * recovery_rate);
+    return payment_due * repayment_ratio;
 }
 
 static double loan_credit_loss(double payment_due, double repayment_ratio){
-    return payment_due * (1.0 - repayment_ratio) * (1.0 - recovery_rate);
+    return payment_due * (1.0 - repayment_ratio);
+}
+
+static double repayment_capacity_ratio(const Bank& bank,
+                                       double nominal_liability,
+                                       double incoming_payment,
+                                       double remaining_asset,
+                                       double remaining_liability){
+    if(nominal_liability<=0.0){
+        return 1.0;
+    }
+
+    double liquid_funds = bank.balanceSheet.cash + incoming_payment;
+    if(liquid_funds<0.0){
+        liquid_funds=0.0;
+    }
+
+    double balance_sheet_funds = bank.balanceSheet.cash
+                               + incoming_payment
+                               + remaining_asset
+                               - remaining_liability
+                               + bank.balanceSheet.otherAssets
+                               - bank.balanceSheet.otherLiabilities;
+    if(balance_sheet_funds<0.0){
+        balance_sheet_funds=0.0;
+    }
+
+    double available_funds = std::min(liquid_funds, balance_sheet_funds);
+    double ratio = std::min(1.0, available_funds/nominal_liability);
+    if(ratio<0.0){
+        ratio=0.0;
+    }
+    return ratio;
 }
 
 class SpinBarrier{
@@ -233,6 +265,8 @@ static void run_parallel_contagion_solver(
     const std::vector<Loan>& loans,
     int threadCount,
     const std::vector<double>& nominal_liabilities,
+    const std::vector<double>& remaining_assets,
+    const std::vector<double>& remaining_liabilities,
     std::vector<double>& repayment_ratio,
     std::vector<double>& next_ratio,
     RepaymentWorkspace& workspace){
@@ -281,11 +315,13 @@ static void run_parallel_contagion_solver(
                     continue;
                 }
 
-                const double available_funds = banks[bank_id].balanceSheet.cash + incoming;
-                double current_ratio = std::min(1.0, available_funds / nominal_liabilities[bank_id]);
-                if(current_ratio < 0.0){
-                    current_ratio = 0.0;
-                }
+                double current_ratio = repayment_capacity_ratio(
+                    banks[bank_id],
+                    nominal_liabilities[bank_id],
+                    incoming,
+                    remaining_assets[bank_id],
+                    remaining_liabilities[bank_id]
+                );
 
                 const double difference = std::abs(current_ratio - repayment_ratio[bank_id]);
                 if(difference > thread_max){
@@ -344,6 +380,10 @@ static void run_parallel_contagion_solver(
             const double total_outgoing = nominal_liabilities[bank_id] * repayment_ratio[bank_id];
             banks[bank_id].balanceSheet.cash += (incoming - total_outgoing);
 
+            if(repayment_ratio[bank_id] < 1.0 - convergence_epsilon){
+                banks[bank_id].defaulted = true;
+            }
+
             if(credit_losses > 0.0){
                 apply_loss(banks[bank_id], credit_losses);
             }
@@ -367,6 +407,19 @@ static std::vector<double> compute_nominal_liabilities(const std::vector<Loan>& 
     return nominalLiabilities;
 }
 
+static void compute_remaining_obligations(const std::vector<Loan>& loans,
+                                          int numberOfBanks,
+                                          std::vector<double>& remainingAssets,
+                                          std::vector<double>& remainingLiabilities){
+    remainingAssets.assign(numberOfBanks, 0.0);
+    remainingLiabilities.assign(numberOfBanks, 0.0);
+
+    for(const auto& loan:loans){
+        remainingAssets[loan.lender]+=loan.remaining;
+        remainingLiabilities[loan.borrower]+=loan.remaining;
+    }
+}
+
 static void apply_repayment_result(std::vector<Bank>& banks, const std::vector<Loan>& loans, const std::vector<double>& nominalLiabilities,
                             const std::vector<double>& repaymentRatio, double convergenceEpsilon){
     int numberOfBanks=static_cast<int>(banks.size());  
@@ -381,6 +434,10 @@ static void apply_repayment_result(std::vector<Bank>& banks, const std::vector<L
     }
 
     for(int i=0; i<numberOfBanks; ++i){
+        if(repaymentRatio[i]<1.0-convergenceEpsilon){
+            banks[i].defaulted=true;
+        }
+
         double totalOutgoing=nominalLiabilities[i]*repaymentRatio[i];
         banks[i].balanceSheet.cash+=(totalIncoming[i]-totalOutgoing);
 
@@ -471,6 +528,9 @@ void run_contagion(std::vector<Bank>& banks, const std::vector<Loan>& loans){
     int numberOfBanks = banks.size();
 
     std::vector<double> nominalLiabilities = compute_nominal_liabilities(loans, numberOfBanks);
+    std::vector<double> remainingAssets;
+    std::vector<double> remainingLiabilities;
+    compute_remaining_obligations(loans, numberOfBanks, remainingAssets, remainingLiabilities);
 
     std::vector<double> repayment_ratio(numberOfBanks, 1.0);
 
@@ -490,10 +550,13 @@ void run_contagion(std::vector<Bank>& banks, const std::vector<Loan>& loans){
 
         for(int i=0; i<numberOfBanks; i++){
             if(nominalLiabilities[i]==0.0) continue;
-            double available_funds = banks[i].balanceSheet.cash + incomingPayments[i];
-            double current_ratio = std::min(1.0, available_funds/nominalLiabilities[i]);
-
-            if(current_ratio<0.0) current_ratio=0.0;
+            double current_ratio = repayment_capacity_ratio(
+                banks[i],
+                nominalLiabilities[i],
+                incomingPayments[i],
+                remainingAssets[i],
+                remainingLiabilities[i]
+            );
 
             double difference = std::abs(current_ratio-repayment_ratio[i]);
 
@@ -564,6 +627,9 @@ void run_contagion_parallel(std::vector<Bank>& banks, const std::vector<Loan>& l
     workspace.init(threadCount, num_banks);
 
     const std::vector<double> nominal_liabilities = compute_nominal_liabilities(loans, num_banks);
+    std::vector<double> remaining_assets;
+    std::vector<double> remaining_liabilities;
+    compute_remaining_obligations(loans, num_banks, remaining_assets, remaining_liabilities);
     std::vector<double> repayment_ratio(num_banks, 1.0);
     std::vector<double> next_ratio(num_banks, 1.0);
 
@@ -572,6 +638,8 @@ void run_contagion_parallel(std::vector<Bank>& banks, const std::vector<Loan>& l
         loans,
         threadCount,
         nominal_liabilities,
+        remaining_assets,
+        remaining_liabilities,
         repayment_ratio,
         next_ratio,
         workspace
