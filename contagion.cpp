@@ -204,18 +204,20 @@ static int choose_thread_count(int requestedThreads, int amountOfWork){
 static const int repayment_parallel_threshold = 10000;
 
 struct RepaymentWorkspace{
+    std::vector<std::vector<int>> loans_by_lender;
     std::vector<double> global_incoming;
     std::vector<double> global_credit_losses;
     std::vector<double> local_max_diff;
-    std::vector<double> thread_incoming;
-    std::vector<double> thread_credit_losses;
 
-    void init(int threadCount, int numBanks){
+    void init(int threadCount, int numBanks, const std::vector<Loan>& loans){
+        loans_by_lender.assign(numBanks, {});
+        for(int loanIdx = 0; loanIdx < static_cast<int>(loans.size()); ++loanIdx){
+            loans_by_lender[loans[loanIdx].lender].push_back(loanIdx);
+        }
+
         global_incoming.assign(numBanks, 0.0);
         global_credit_losses.assign(numBanks, 0.0);
         local_max_diff.assign(threadCount, 0.0);
-        thread_incoming.assign(static_cast<std::size_t>(threadCount) * numBanks, 0.0);
-        thread_credit_losses.assign(static_cast<std::size_t>(threadCount) * numBanks, 0.0);
     }
 };
 
@@ -326,46 +328,36 @@ static void run_parallel_contagion_solver(
     std::vector<double>& next_ratio,
     RepaymentWorkspace& workspace){
     const int num_banks = static_cast<int>(banks.size());
-    const int num_loans = static_cast<int>(loans.size());
     const int max_iterations = 100;
     const double convergence_epsilon = 1e-6;
 
     SpinBarrier iteration_barrier(threadCount);
-    SpinBarrier apply_barrier(threadCount);
     std::atomic<bool> converged{false};
 
     get_persistent_team().run(threadCount, [&](int thread_id){
-        double* localIncoming = workspace.thread_incoming.data() + static_cast<std::size_t>(thread_id) * num_banks;
-        double* localCreditLosses = workspace.thread_credit_losses.data() + static_cast<std::size_t>(thread_id) * num_banks;
+        const int bank_begin = static_cast<int>((static_cast<long long>(thread_id) * num_banks) / threadCount);
+        const int bank_end = static_cast<int>((static_cast<long long>(thread_id + 1) * num_banks) / threadCount);
 
         for(int iteration = 0; iteration < max_iterations; ++iteration){
             if(converged.load(std::memory_order_acquire)){
                 break;
             }
 
-            std::fill(localIncoming, localIncoming + num_banks, 0.0);
-
-            const int loan_begin = static_cast<int>((static_cast<long long>(thread_id) * num_loans) / threadCount);
-            const int loan_end = static_cast<int>((static_cast<long long>(thread_id + 1) * num_loans) / threadCount);
-
-            for(int loan_idx = loan_begin; loan_idx < loan_end; ++loan_idx){
-                const Loan& loan = loans[loan_idx];
-                const double ratio = repayment_ratio[loan.borrower];
-                add_loan_repayment_effect(loan, ratio, localIncoming[loan.lender], nullptr);
+            for(int lender = bank_begin; lender < bank_end; ++lender){
+                double incoming = 0.0;
+                for(int loan_idx : workspace.loans_by_lender[lender]){
+                    const Loan& loan = loans[loan_idx];
+                    const double ratio = repayment_ratio[loan.borrower];
+                    add_loan_repayment_effect(loan, ratio, incoming, nullptr);
+                }
+                workspace.global_incoming[lender] = incoming;
             }
 
             iteration_barrier.wait();
 
-            const int bank_begin = static_cast<int>((static_cast<long long>(thread_id) * num_banks) / threadCount);
-            const int bank_end = static_cast<int>((static_cast<long long>(thread_id + 1) * num_banks) / threadCount);
             double thread_max = 0.0;
 
             for(int bank_id = bank_begin; bank_id < bank_end; ++bank_id){
-                double incoming = 0.0;
-                for(int t = 0; t < threadCount; ++t){
-                    incoming += workspace.thread_incoming[static_cast<std::size_t>(t) * num_banks + bank_id];
-                }
-
                 if(nominal_liabilities[bank_id] == 0.0){
                     continue;
                 }
@@ -373,7 +365,7 @@ static void run_parallel_contagion_solver(
                 next_ratio[bank_id] = update_repayment_ratio_for_bank(
                     banks[bank_id],
                     nominal_liabilities[bank_id],
-                    incoming,
+                    workspace.global_incoming[bank_id],
                     remaining_assets[bank_id],
                     remaining_liabilities[bank_id],
                     repayment_ratio[bank_id],
@@ -399,48 +391,27 @@ static void run_parallel_contagion_solver(
             iteration_barrier.wait();
         }
 
-        std::fill(localIncoming, localIncoming + num_banks, 0.0);
-        std::fill(localCreditLosses, localCreditLosses + num_banks, 0.0);
-
-        const int loan_begin = static_cast<int>((static_cast<long long>(thread_id) * num_loans) / threadCount);
-        const int loan_end = static_cast<int>((static_cast<long long>(thread_id + 1) * num_loans) / threadCount);
-
-        for(int loan_idx = loan_begin; loan_idx < loan_end; ++loan_idx){
-            const Loan& loan = loans[loan_idx];
-            const double ratio = repayment_ratio[loan.borrower];
-            add_loan_repayment_effect(
-                loan,
-                ratio,
-                localIncoming[loan.lender],
-                &localCreditLosses[loan.lender]
-            );
-        }
-
-        apply_barrier.wait();
-
-        const int bank_begin = static_cast<int>((static_cast<long long>(thread_id) * num_banks) / threadCount);
-        const int bank_end = static_cast<int>((static_cast<long long>(thread_id + 1) * num_banks) / threadCount);
-
         for(int bank_id = bank_begin; bank_id < bank_end; ++bank_id){
             double incoming = 0.0;
             double credit_losses = 0.0;
-            for(int t = 0; t < threadCount; ++t){
-                const std::size_t offset = static_cast<std::size_t>(t) * num_banks + bank_id;
-                incoming += workspace.thread_incoming[offset];
-                credit_losses += workspace.thread_credit_losses[offset];
+            for(int loan_idx : workspace.loans_by_lender[bank_id]){
+                const Loan& loan = loans[loan_idx];
+                const double ratio = repayment_ratio[loan.borrower];
+                add_loan_repayment_effect(loan, ratio, incoming, &credit_losses);
             }
+
+            workspace.global_incoming[bank_id] = incoming;
+            workspace.global_credit_losses[bank_id] = credit_losses;
 
             apply_bank_repayment_result(
                 banks[bank_id],
-                incoming,
-                credit_losses,
+                workspace.global_incoming[bank_id],
+                workspace.global_credit_losses[bank_id],
                 nominal_liabilities[bank_id],
                 repayment_ratio[bank_id],
                 convergence_epsilon
             );
         }
-
-        apply_barrier.wait();
     });
 }
 
@@ -671,7 +642,7 @@ void run_contagion_parallel(std::vector<Bank>& banks, const std::vector<Loan>& l
     }
 
     RepaymentWorkspace workspace;
-    workspace.init(threadCount, num_banks);
+    workspace.init(threadCount, num_banks, loans);
 
     const std::vector<double> nominal_liabilities = compute_nominal_liabilities(loans, num_banks);
     std::vector<double> remaining_assets;
