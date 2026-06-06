@@ -205,6 +205,7 @@ static const int repayment_parallel_threshold = 10000;
 
 struct RepaymentWorkspace{
     std::vector<std::vector<int>> loans_by_lender;
+    std::vector<std::vector<int>> lenders_by_thread;
     std::vector<double> global_incoming;
     std::vector<double> global_credit_losses;
     std::vector<double> local_max_diff;
@@ -213,6 +214,32 @@ struct RepaymentWorkspace{
         loans_by_lender.assign(numBanks, {});
         for(int loanIdx = 0; loanIdx < static_cast<int>(loans.size()); ++loanIdx){
             loans_by_lender[loans[loanIdx].lender].push_back(loanIdx);
+        }
+
+        std::vector<int> active_lenders;
+        active_lenders.reserve(numBanks);
+        for(int lender = 0; lender < numBanks; ++lender){
+            if(!loans_by_lender[lender].empty()){
+                active_lenders.push_back(lender);
+            }
+        }
+
+        std::sort(active_lenders.begin(), active_lenders.end(), [&](int left, int right){
+            return loans_by_lender[left].size() > loans_by_lender[right].size();
+        });
+
+        lenders_by_thread.assign(threadCount, {});
+        std::vector<int> thread_work(threadCount, 0);
+        for(int lender : active_lenders){
+            int best_thread = 0;
+            for(int t = 1; t < threadCount; ++t){
+                if(thread_work[t] < thread_work[best_thread]){
+                    best_thread = t;
+                }
+            }
+
+            lenders_by_thread[best_thread].push_back(lender);
+            thread_work[best_thread] += static_cast<int>(loans_by_lender[lender].size());
         }
 
         global_incoming.assign(numBanks, 0.0);
@@ -343,7 +370,7 @@ static void run_parallel_contagion_solver(
                 break;
             }
 
-            for(int lender = bank_begin; lender < bank_end; ++lender){
+            for(int lender : workspace.lenders_by_thread[thread_id]){
                 double incoming = 0.0;
                 for(int loan_idx : workspace.loans_by_lender[lender]){
                     const Loan& loan = loans[loan_idx];
@@ -391,18 +418,22 @@ static void run_parallel_contagion_solver(
             iteration_barrier.wait();
         }
 
-        for(int bank_id = bank_begin; bank_id < bank_end; ++bank_id){
+        for(int lender : workspace.lenders_by_thread[thread_id]){
             double incoming = 0.0;
             double credit_losses = 0.0;
-            for(int loan_idx : workspace.loans_by_lender[bank_id]){
+            for(int loan_idx : workspace.loans_by_lender[lender]){
                 const Loan& loan = loans[loan_idx];
                 const double ratio = repayment_ratio[loan.borrower];
                 add_loan_repayment_effect(loan, ratio, incoming, &credit_losses);
             }
 
-            workspace.global_incoming[bank_id] = incoming;
-            workspace.global_credit_losses[bank_id] = credit_losses;
+            workspace.global_incoming[lender] = incoming;
+            workspace.global_credit_losses[lender] = credit_losses;
+        }
 
+        iteration_barrier.wait();
+
+        for(int bank_id = bank_begin; bank_id < bank_end; ++bank_id){
             apply_bank_repayment_result(
                 banks[bank_id],
                 workspace.global_incoming[bank_id],
