@@ -78,6 +78,16 @@ static double loan_credit_loss(double payment_due, double repayment_ratio){
     return payment_due * (1.0 - repayment_ratio);
 }
 
+static void add_loan_repayment_effect(const Loan& loan,
+                                      double repayment_ratio,
+                                      double& incoming_payment,
+                                      double* credit_loss){
+    incoming_payment += loan_incoming_payment(loan.payment_due, repayment_ratio);
+    if(credit_loss){
+        *credit_loss += loan_credit_loss(loan.payment_due, repayment_ratio);
+    }
+}
+
 static double repayment_capacity_ratio(const Bank& bank,
                                        double nominal_liability,
                                        double incoming_payment,
@@ -108,6 +118,51 @@ static double repayment_capacity_ratio(const Bank& bank,
         ratio=0.0;
     }
     return ratio;
+}
+
+static double update_repayment_ratio_for_bank(const Bank& bank,
+                                              double nominal_liability,
+                                              double incoming_payment,
+                                              double remaining_asset,
+                                              double remaining_liability,
+                                              double previous_ratio,
+                                              double& max_difference){
+    double current_ratio = repayment_capacity_ratio(
+        bank,
+        nominal_liability,
+        incoming_payment,
+        remaining_asset,
+        remaining_liability
+    );
+
+    double difference = std::abs(current_ratio-previous_ratio);
+    if(difference>max_difference){
+        max_difference=difference;
+    }
+
+    return current_ratio;
+}
+
+static void apply_bank_repayment_result(Bank& bank,
+                                        double incoming_payment,
+                                        double credit_loss,
+                                        double nominal_liability,
+                                        double repayment_ratio,
+                                        double convergence_epsilon){
+    if(repayment_ratio<1.0-convergence_epsilon){
+        bank.defaulted=true;
+    }
+
+    double totalOutgoing=nominal_liability*repayment_ratio;
+    bank.balanceSheet.cash+=(incoming_payment-totalOutgoing);
+
+    if(credit_loss>0.0){
+        apply_loss(bank, credit_loss);
+    }
+
+    if(is_insolvent(bank)){
+        bank.defaulted = true;
+    }
 }
 
 class SpinBarrier{
@@ -296,7 +351,7 @@ static void run_parallel_contagion_solver(
             for(int loan_idx = loan_begin; loan_idx < loan_end; ++loan_idx){
                 const Loan& loan = loans[loan_idx];
                 const double ratio = repayment_ratio[loan.borrower];
-                localIncoming[loan.lender] += loan_incoming_payment(loan.payment_due, ratio);
+                add_loan_repayment_effect(loan, ratio, localIncoming[loan.lender], nullptr);
             }
 
             iteration_barrier.wait();
@@ -315,20 +370,15 @@ static void run_parallel_contagion_solver(
                     continue;
                 }
 
-                double current_ratio = repayment_capacity_ratio(
+                next_ratio[bank_id] = update_repayment_ratio_for_bank(
                     banks[bank_id],
                     nominal_liabilities[bank_id],
                     incoming,
                     remaining_assets[bank_id],
-                    remaining_liabilities[bank_id]
+                    remaining_liabilities[bank_id],
+                    repayment_ratio[bank_id],
+                    thread_max
                 );
-
-                const double difference = std::abs(current_ratio - repayment_ratio[bank_id]);
-                if(difference > thread_max){
-                    thread_max = difference;
-                }
-
-                next_ratio[bank_id] = current_ratio;
             }
 
             workspace.local_max_diff[thread_id] = thread_max;
@@ -340,10 +390,9 @@ static void run_parallel_contagion_solver(
                     max_difference = std::max(max_difference, workspace.local_max_diff[t]);
                 }
 
+                repayment_ratio.swap(next_ratio);
                 if(max_difference < convergence_epsilon){
                     converged.store(true, std::memory_order_release);
-                } else {
-                    repayment_ratio.swap(next_ratio);
                 }
             }
 
@@ -359,8 +408,12 @@ static void run_parallel_contagion_solver(
         for(int loan_idx = loan_begin; loan_idx < loan_end; ++loan_idx){
             const Loan& loan = loans[loan_idx];
             const double ratio = repayment_ratio[loan.borrower];
-            localIncoming[loan.lender] += loan_incoming_payment(loan.payment_due, ratio);
-            localCreditLosses[loan.lender] += loan_credit_loss(loan.payment_due, ratio);
+            add_loan_repayment_effect(
+                loan,
+                ratio,
+                localIncoming[loan.lender],
+                &localCreditLosses[loan.lender]
+            );
         }
 
         apply_barrier.wait();
@@ -377,20 +430,14 @@ static void run_parallel_contagion_solver(
                 credit_losses += workspace.thread_credit_losses[offset];
             }
 
-            const double total_outgoing = nominal_liabilities[bank_id] * repayment_ratio[bank_id];
-            banks[bank_id].balanceSheet.cash += (incoming - total_outgoing);
-
-            if(repayment_ratio[bank_id] < 1.0 - convergence_epsilon){
-                banks[bank_id].defaulted = true;
-            }
-
-            if(credit_losses > 0.0){
-                apply_loss(banks[bank_id], credit_losses);
-            }
-
-            if(is_insolvent(banks[bank_id])){
-                banks[bank_id].defaulted = true;
-            }
+            apply_bank_repayment_result(
+                banks[bank_id],
+                incoming,
+                credit_losses,
+                nominal_liabilities[bank_id],
+                repayment_ratio[bank_id],
+                convergence_epsilon
+            );
         }
 
         apply_barrier.wait();
@@ -429,27 +476,23 @@ static void apply_repayment_result(std::vector<Bank>& banks, const std::vector<L
 
     for(const auto& loan:loans){
         double ratio = repaymentRatio[loan.borrower];
-        totalIncoming[loan.lender] += loan_incoming_payment(loan.payment_due, ratio);
-        creditLosses[loan.lender] += loan_credit_loss(loan.payment_due, ratio);
+        add_loan_repayment_effect(
+            loan,
+            ratio,
+            totalIncoming[loan.lender],
+            &creditLosses[loan.lender]
+        );
     }
 
     for(int i=0; i<numberOfBanks; ++i){
-        if(repaymentRatio[i]<1.0-convergenceEpsilon){
-            banks[i].defaulted=true;
-        }
-
-        double totalOutgoing=nominalLiabilities[i]*repaymentRatio[i];
-        banks[i].balanceSheet.cash+=(totalIncoming[i]-totalOutgoing);
-
-        if(creditLosses[i]>0.0){
-            apply_loss(banks[i], creditLosses[i]);
-        }
-
-
-        //Does it default if it is insolvent???
-        if(is_insolvent(banks[i])){
-            banks[i].defaulted = true;
-        }
+        apply_bank_repayment_result(
+            banks[i],
+            totalIncoming[i],
+            creditLosses[i],
+            nominalLiabilities[i],
+            repaymentRatio[i],
+            convergenceEpsilon
+        );
     }
 }
 
@@ -541,8 +584,12 @@ void run_contagion(std::vector<Bank>& banks, const std::vector<Loan>& loans){
         std::vector<double> incomingPayments(numberOfBanks, 0.0);
 
         for(const auto& loan:loans){
-            incomingPayments[loan.lender] += loan_incoming_payment(
-                loan.payment_due, repayment_ratio[loan.borrower]);
+            add_loan_repayment_effect(
+                loan,
+                repayment_ratio[loan.borrower],
+                incomingPayments[loan.lender],
+                nullptr
+            );
         }
 
         std::vector<double> next_ratio=repayment_ratio;
@@ -550,20 +597,15 @@ void run_contagion(std::vector<Bank>& banks, const std::vector<Loan>& loans){
 
         for(int i=0; i<numberOfBanks; i++){
             if(nominalLiabilities[i]==0.0) continue;
-            double current_ratio = repayment_capacity_ratio(
+            next_ratio[i]=update_repayment_ratio_for_bank(
                 banks[i],
                 nominalLiabilities[i],
                 incomingPayments[i],
                 remainingAssets[i],
-                remainingLiabilities[i]
+                remainingLiabilities[i],
+                repayment_ratio[i],
+                maxDifference
             );
-
-            double difference = std::abs(current_ratio-repayment_ratio[i]);
-
-            if(difference>maxDifference){
-                maxDifference=difference;
-            }
-            next_ratio[i]=current_ratio;
         }
         repayment_ratio=next_ratio;
 
@@ -621,7 +663,12 @@ void run_contagion_parallel(std::vector<Bank>& banks, const std::vector<Loan>& l
     }
 
     const int num_banks = static_cast<int>(banks.size());
-    const int threadCount = choose_thread_count(numberOfThreads, static_cast<int>(loans.size()));
+    int threadCount = choose_thread_count(numberOfThreads, static_cast<int>(loans.size()));
+    threadCount = std::min(threadCount, get_persistent_team().capacity());
+    if(threadCount <= 1){
+        run_contagion(banks, loans);
+        return;
+    }
 
     RepaymentWorkspace workspace;
     workspace.init(threadCount, num_banks);
