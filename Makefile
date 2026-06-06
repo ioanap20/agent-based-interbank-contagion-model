@@ -1,6 +1,6 @@
 CXX = g++
 CXXFLAGS = -std=c++17 -O2 -Wall -Wextra -pthread
-SRCS = main.cpp banks.cpp market.cpp shock.cpp contagion.cpp output.cpp benchmarking.cpp
+SRCS = main.cpp banks.cpp market.cpp shock.cpp contagion.cpp output.cpp benchmarking.cpp small_market.cpp
 TARGET = contagion_model
 
 .PHONY: all clean run

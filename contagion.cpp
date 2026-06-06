@@ -41,6 +41,9 @@
 #include <functional>
 #include <memory>
 #include <atomic>
+#include <chrono>
+#include <cstdlib>
+#include <fstream>
 
 /*struct SimpleThreadBarrier{
     std::mutex mtx;
@@ -203,9 +206,118 @@ static int choose_thread_count(int requestedThreads, int amountOfWork){
 
 static const int repayment_parallel_threshold = 10000;
 
+static long long elapsed_ns(std::chrono::steady_clock::time_point start,
+                            std::chrono::steady_clock::time_point end){
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
+}
+
+static bool parallel_diagnostics_enabled(){
+    const char* value = std::getenv("CONTAGION_PARALLEL_DIAGNOSTICS");
+    return value && std::string(value) != "0";
+}
+
+static std::string parallel_diagnostics_log_path(){
+    const char* value = std::getenv("CONTAGION_PARALLEL_LOG");
+    if(value && value[0] != '\0'){
+        return value;
+    }
+    return "parallel_diagnostics.log";
+}
+
+struct ParallelDiagnostics{
+    int num_banks = 0;
+    int num_loans = 0;
+    int thread_count = 0;
+    int active_lenders = 0;
+    int iterations = 0;
+    long long setup_ns = 0;
+    long long solve_ns = 0;
+    std::vector<int> lenders_per_thread;
+    std::vector<int> loans_per_thread;
+    std::vector<long long> incoming_ns;
+    std::vector<long long> barrier_ns;
+    std::vector<long long> ratio_update_ns;
+    std::vector<long long> convergence_ns;
+    std::vector<long long> final_accumulate_ns;
+    std::vector<long long> final_apply_ns;
+
+    void init(int threads){
+        lenders_per_thread.assign(threads, 0);
+        loans_per_thread.assign(threads, 0);
+        incoming_ns.assign(threads, 0);
+        barrier_ns.assign(threads, 0);
+        ratio_update_ns.assign(threads, 0);
+        convergence_ns.assign(threads, 0);
+        final_accumulate_ns.assign(threads, 0);
+        final_apply_ns.assign(threads, 0);
+    }
+};
+
+static long long sum_ns(const std::vector<long long>& values){
+    long long total = 0;
+    for(long long value : values){
+        total += value;
+    }
+    return total;
+}
+
+static long long max_ns(const std::vector<long long>& values){
+    long long maximum = 0;
+    for(long long value : values){
+        maximum = std::max(maximum, value);
+    }
+    return maximum;
+}
+
+static void write_parallel_diagnostics(const ParallelDiagnostics& diagnostics){
+    std::ofstream out(parallel_diagnostics_log_path(), std::ios::app);
+    if(!out){
+        return;
+    }
+
+    out << "parallel contagion diagnostics\n";
+    out << "banks=" << diagnostics.num_banks
+        << " loans=" << diagnostics.num_loans
+        << " threads=" << diagnostics.thread_count
+        << " active_lenders=" << diagnostics.active_lenders
+        << " iterations=" << diagnostics.iterations << '\n';
+    out << "setup_ms=" << diagnostics.setup_ns / 1000000.0
+        << " solve_ms=" << diagnostics.solve_ns / 1000000.0 << '\n';
+    out << "phase_ms_sum"
+        << " incoming=" << sum_ns(diagnostics.incoming_ns) / 1000000.0
+        << " barrier=" << sum_ns(diagnostics.barrier_ns) / 1000000.0
+        << " ratio_update=" << sum_ns(diagnostics.ratio_update_ns) / 1000000.0
+        << " convergence=" << sum_ns(diagnostics.convergence_ns) / 1000000.0
+        << " final_accumulate=" << sum_ns(diagnostics.final_accumulate_ns) / 1000000.0
+        << " final_apply=" << sum_ns(diagnostics.final_apply_ns) / 1000000.0 << '\n';
+    out << "phase_ms_max"
+        << " incoming=" << max_ns(diagnostics.incoming_ns) / 1000000.0
+        << " barrier=" << max_ns(diagnostics.barrier_ns) / 1000000.0
+        << " ratio_update=" << max_ns(diagnostics.ratio_update_ns) / 1000000.0
+        << " convergence=" << max_ns(diagnostics.convergence_ns) / 1000000.0
+        << " final_accumulate=" << max_ns(diagnostics.final_accumulate_ns) / 1000000.0
+        << " final_apply=" << max_ns(diagnostics.final_apply_ns) / 1000000.0 << '\n';
+    out << "thread lenders loans incoming_ms barrier_ms ratio_update_ms convergence_ms final_accumulate_ms final_apply_ms\n";
+
+    for(int t = 0; t < diagnostics.thread_count; ++t){
+        out << t
+            << ' ' << diagnostics.lenders_per_thread[t]
+            << ' ' << diagnostics.loans_per_thread[t]
+            << ' ' << diagnostics.incoming_ns[t] / 1000000.0
+            << ' ' << diagnostics.barrier_ns[t] / 1000000.0
+            << ' ' << diagnostics.ratio_update_ns[t] / 1000000.0
+            << ' ' << diagnostics.convergence_ns[t] / 1000000.0
+            << ' ' << diagnostics.final_accumulate_ns[t] / 1000000.0
+            << ' ' << diagnostics.final_apply_ns[t] / 1000000.0 << '\n';
+    }
+    out << '\n';
+}
+
 struct RepaymentWorkspace{
     std::vector<std::vector<int>> loans_by_lender;
     std::vector<std::vector<int>> lenders_by_thread;
+    int active_lender_count = 0;
+    std::vector<int> loans_per_thread;
     std::vector<double> global_incoming;
     std::vector<double> global_credit_losses;
     std::vector<double> local_max_diff;
@@ -228,18 +340,19 @@ struct RepaymentWorkspace{
             return loans_by_lender[left].size() > loans_by_lender[right].size();
         });
 
+        active_lender_count = static_cast<int>(active_lenders.size());
         lenders_by_thread.assign(threadCount, {});
-        std::vector<int> thread_work(threadCount, 0);
+        loans_per_thread.assign(threadCount, 0);
         for(int lender : active_lenders){
             int best_thread = 0;
             for(int t = 1; t < threadCount; ++t){
-                if(thread_work[t] < thread_work[best_thread]){
+                if(loans_per_thread[t] < loans_per_thread[best_thread]){
                     best_thread = t;
                 }
             }
 
             lenders_by_thread[best_thread].push_back(lender);
-            thread_work[best_thread] += static_cast<int>(loans_by_lender[lender].size());
+            loans_per_thread[best_thread] += static_cast<int>(loans_by_lender[lender].size());
         }
 
         global_incoming.assign(numBanks, 0.0);
@@ -353,7 +466,8 @@ static void run_parallel_contagion_solver(
     const std::vector<double>& remaining_liabilities,
     std::vector<double>& repayment_ratio,
     std::vector<double>& next_ratio,
-    RepaymentWorkspace& workspace){
+    RepaymentWorkspace& workspace,
+    ParallelDiagnostics* diagnostics){
     const int num_banks = static_cast<int>(banks.size());
     const int max_iterations = 100;
     const double convergence_epsilon = 1e-6;
@@ -370,6 +484,10 @@ static void run_parallel_contagion_solver(
                 break;
             }
 
+            std::chrono::steady_clock::time_point phase_start;
+            if(diagnostics){
+                phase_start = std::chrono::steady_clock::now();
+            }
             for(int lender : workspace.lenders_by_thread[thread_id]){
                 double incoming = 0.0;
                 for(int loan_idx : workspace.loans_by_lender[lender]){
@@ -379,11 +497,23 @@ static void run_parallel_contagion_solver(
                 }
                 workspace.global_incoming[lender] = incoming;
             }
+            if(diagnostics){
+                diagnostics->incoming_ns[thread_id] += elapsed_ns(phase_start, std::chrono::steady_clock::now());
+            }
 
+            if(diagnostics){
+                phase_start = std::chrono::steady_clock::now();
+            }
             iteration_barrier.wait();
+            if(diagnostics){
+                diagnostics->barrier_ns[thread_id] += elapsed_ns(phase_start, std::chrono::steady_clock::now());
+            }
 
             double thread_max = 0.0;
 
+            if(diagnostics){
+                phase_start = std::chrono::steady_clock::now();
+            }
             for(int bank_id = bank_begin; bank_id < bank_end; ++bank_id){
                 if(nominal_liabilities[bank_id] == 0.0){
                     continue;
@@ -399,11 +529,27 @@ static void run_parallel_contagion_solver(
                     thread_max
                 );
             }
+            if(diagnostics){
+                diagnostics->ratio_update_ns[thread_id] += elapsed_ns(phase_start, std::chrono::steady_clock::now());
+            }
 
             workspace.local_max_diff[thread_id] = thread_max;
+            if(diagnostics){
+                phase_start = std::chrono::steady_clock::now();
+            }
             iteration_barrier.wait();
+            if(diagnostics){
+                diagnostics->barrier_ns[thread_id] += elapsed_ns(phase_start, std::chrono::steady_clock::now());
+            }
 
             if(thread_id == 0){
+                if(diagnostics){
+                    phase_start = std::chrono::steady_clock::now();
+                }
+                if(diagnostics){
+                    diagnostics->iterations++;
+                }
+
                 double max_difference = workspace.local_max_diff[0];
                 for(int t = 1; t < threadCount; ++t){
                     max_difference = std::max(max_difference, workspace.local_max_diff[t]);
@@ -413,11 +559,24 @@ static void run_parallel_contagion_solver(
                 if(max_difference < convergence_epsilon){
                     converged.store(true, std::memory_order_release);
                 }
+                if(diagnostics){
+                    diagnostics->convergence_ns[thread_id] += elapsed_ns(phase_start, std::chrono::steady_clock::now());
+                }
             }
 
+            if(diagnostics){
+                phase_start = std::chrono::steady_clock::now();
+            }
             iteration_barrier.wait();
+            if(diagnostics){
+                diagnostics->barrier_ns[thread_id] += elapsed_ns(phase_start, std::chrono::steady_clock::now());
+            }
         }
 
+        std::chrono::steady_clock::time_point phase_start;
+        if(diagnostics){
+            phase_start = std::chrono::steady_clock::now();
+        }
         for(int lender : workspace.lenders_by_thread[thread_id]){
             double incoming = 0.0;
             double credit_losses = 0.0;
@@ -430,9 +589,21 @@ static void run_parallel_contagion_solver(
             workspace.global_incoming[lender] = incoming;
             workspace.global_credit_losses[lender] = credit_losses;
         }
+        if(diagnostics){
+            diagnostics->final_accumulate_ns[thread_id] += elapsed_ns(phase_start, std::chrono::steady_clock::now());
+        }
 
+        if(diagnostics){
+            phase_start = std::chrono::steady_clock::now();
+        }
         iteration_barrier.wait();
+        if(diagnostics){
+            diagnostics->barrier_ns[thread_id] += elapsed_ns(phase_start, std::chrono::steady_clock::now());
+        }
 
+        if(diagnostics){
+            phase_start = std::chrono::steady_clock::now();
+        }
         for(int bank_id = bank_begin; bank_id < bank_end; ++bank_id){
             apply_bank_repayment_result(
                 banks[bank_id],
@@ -442,6 +613,9 @@ static void run_parallel_contagion_solver(
                 repayment_ratio[bank_id],
                 convergence_epsilon
             );
+        }
+        if(diagnostics){
+            diagnostics->final_apply_ns[thread_id] += elapsed_ns(phase_start, std::chrono::steady_clock::now());
         }
     });
 }
@@ -672,6 +846,20 @@ void run_contagion_parallel(std::vector<Bank>& banks, const std::vector<Loan>& l
         return;
     }
 
+    ParallelDiagnostics diagnostics;
+    ParallelDiagnostics* diagnostics_ptr = nullptr;
+    if(parallel_diagnostics_enabled()){
+        diagnostics_ptr = &diagnostics;
+        diagnostics.init(threadCount);
+        diagnostics.num_banks = num_banks;
+        diagnostics.num_loans = static_cast<int>(loans.size());
+        diagnostics.thread_count = threadCount;
+    }
+
+    std::chrono::steady_clock::time_point setup_start;
+    if(diagnostics_ptr){
+        setup_start = std::chrono::steady_clock::now();
+    }
     RepaymentWorkspace workspace;
     workspace.init(threadCount, num_banks, loans);
 
@@ -681,7 +869,19 @@ void run_contagion_parallel(std::vector<Bank>& banks, const std::vector<Loan>& l
     compute_remaining_obligations(loans, num_banks, remaining_assets, remaining_liabilities);
     std::vector<double> repayment_ratio(num_banks, 1.0);
     std::vector<double> next_ratio(num_banks, 1.0);
+    if(diagnostics_ptr){
+        diagnostics.setup_ns = elapsed_ns(setup_start, std::chrono::steady_clock::now());
+        diagnostics.active_lenders = workspace.active_lender_count;
+        for(int t = 0; t < threadCount; ++t){
+            diagnostics.lenders_per_thread[t] = static_cast<int>(workspace.lenders_by_thread[t].size());
+            diagnostics.loans_per_thread[t] = workspace.loans_per_thread[t];
+        }
+    }
 
+    std::chrono::steady_clock::time_point solve_start;
+    if(diagnostics_ptr){
+        solve_start = std::chrono::steady_clock::now();
+    }
     run_parallel_contagion_solver(
         banks,
         loans,
@@ -691,8 +891,13 @@ void run_contagion_parallel(std::vector<Bank>& banks, const std::vector<Loan>& l
         remaining_liabilities,
         repayment_ratio,
         next_ratio,
-        workspace
+        workspace,
+        diagnostics_ptr
     );
+    if(diagnostics_ptr){
+        diagnostics.solve_ns = elapsed_ns(solve_start, std::chrono::steady_clock::now());
+        write_parallel_diagnostics(diagnostics);
+    }
 }
 
 
