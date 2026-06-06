@@ -21,6 +21,8 @@ struct Loan{
     double remaining;
 
     LoanType type;
+
+    int remaining_quarters;
 };
 // we create loan_indexes to be able to viasualise the small market and to keep track of all loans and trasactions between banks
 struct LoanIndex{
@@ -44,12 +46,13 @@ double lending_gap(const Bank& bank, LoanType type);
 double borrowing_gap(const Bank& bank, LoanType type);
 
 double size_score(const Bank& borrower, const Bank& lender);
-double relationship_score(int borrower_id, int lender_id, LoanType type, const std::vector<Loan>& previous_loans);
+double relationship_score(int borrower_id, int lender_id, LoanType type);
 double combined_score(double size_score_value, double relationship_score_value);
 
-double lending_probability(double score, const Bank& lender);
+double lending_probability(double score, const Bank& lender, const Bank& borrower);
 double repayment_fraction(LoanType type);
 
+void advance_market_time(std::vector<Bank>& banks, std::vector<Loan>& loans);
 LoanIndex build_loan_index(const std::vector<Loan>& loans, int num_banks);
 
 double total_outgoing_payment(int bank_id, const std::vector<Loan>& loans);
