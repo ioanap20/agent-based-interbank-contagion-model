@@ -196,7 +196,7 @@ static void run_one_experiment(const std::vector<Bank>& baseBanks, const std::ve
 
         banks=sequentialBanks;
 
-        apply_relationship_decay(banks);
+        advance_market_time(banks, cumulativeLoans);
     }
 
     for(std::size_t i=0; i<threadNumbers.size();i++){
@@ -218,7 +218,7 @@ static void run_one_experiment(const std::vector<Bank>& baseBanks, const std::ve
 
 
 void run_benchmarking(){
-    std::vector<int> bankNumbers = {20000};
+    std::vector<int> bankNumbers = {5000, 10000};
     std::vector<double> shockPercentages = {0.20, 0.40, 0.60, 0.80};
     std::vector<int> threadNumbers = {1, 2, 4, 8, 10};
 

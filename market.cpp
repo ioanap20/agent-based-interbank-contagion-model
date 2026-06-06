@@ -189,13 +189,13 @@ double repayment_fraction(LoanType type){
    switch (type)
    {
    case LoanType::Overnight:
-      return get_uniform_random(1.001, 1.005);
+      return 1.0;
    
    case LoanType::ShortTerm:
-      return get_uniform_random(1.01, 1.03);
+      return get_uniform_random(0.99, 1.00);
    
    case LoanType::LongTerm:
-      return get_uniform_random(1.03, 1.08);
+      return get_uniform_random(0.25, 1.00);
    }
    return 1.0;
 }
@@ -289,7 +289,7 @@ std::vector<Loan> build_interbank_market(std::vector<Bank>& banks){
 
             double equity_limit = max_fraction_of_lender_equity * std::max(banks[lender_id].balanceSheet.equity, 1.0);
             
-            double amount = 3.0 * std::min({borrowing_need, lender_willingness, max_loan_amount, equity_limit, cash_limit});
+            double amount = std::min({borrowing_need, lender_willingness, max_loan_amount, equity_limit, cash_limit});
             if(amount<=min_loan_amount) continue;
 
             Loan loan;
