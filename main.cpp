@@ -22,6 +22,7 @@
 #include <iostream>
 #include <string>
 #include <cstdlib>
+#include <filesystem>
 
 void run_benchmarking();
 void run_seeded_experiment(int numberOfBanks,
@@ -29,6 +30,11 @@ void run_seeded_experiment(int numberOfBanks,
                            const std::string& seedsPath,
                            const std::string& resultsPath,
                            bool runSequential);
+
+static std::string default_seeded_results_path(int numberOfBanks, int numberOfThreads){
+    return "results/seeded_results_" + std::to_string(numberOfBanks)
+         + "_" + std::to_string(numberOfThreads) + ".json";
+}
 
 int main(int argc, char* argv[]){
     if(argc > 1 && std::string(argv[1]) == "benchmark"){
@@ -42,7 +48,7 @@ int main(int argc, char* argv[]){
         int numberOfBanks = std::atoi(argv[2]);
         int numberOfThreads = std::atoi(argv[3]);
         std::string seedsPath = "experiment_seeds.json";
-        std::string resultsPath = "seeded_results.json";
+        std::string resultsPath;
         bool runSequential = true;
         int pathCount = 0;
 
@@ -67,6 +73,21 @@ int main(int argc, char* argv[]){
         if(numberOfBanks <= 0 || numberOfThreads <= 0){
             std::cerr << "Usage: ./contagion seeded <number_of_banks> <number_of_threads> [seeds.json] [results.json] [--parallel-only]" << std::endl;
             return 1;
+        }
+
+        if(resultsPath.empty()){
+            resultsPath = default_seeded_results_path(numberOfBanks, numberOfThreads);
+        }
+
+        if(std::filesystem::exists(resultsPath)){
+            std::cout << "Skipping seeded experiment because results already exist: "
+                      << resultsPath << std::endl;
+            return 0;
+        }
+
+        std::filesystem::path resultFile(resultsPath);
+        if(resultFile.has_parent_path()){
+            std::filesystem::create_directories(resultFile.parent_path());
         }
 
         std::cout << "Running seeded experiment" << std::endl;
