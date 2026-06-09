@@ -224,11 +224,11 @@ static std::vector<std::uint32_t> read_seed_file(const std::string& path){
     std::vector<std::uint32_t> seeds;
     std::stringstream parser(contents);
     unsigned long value = 0;
-    while(parser >> value && seeds.size() < 10){
+    while(parser >> value){
         seeds.push_back(static_cast<std::uint32_t>(value));
     }
 
-    if(seeds.size() != 10){
+    if(seeds.empty()){
         seeds = default_experiment_seeds();
         write_seed_file(path, seeds);
     }

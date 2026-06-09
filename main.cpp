@@ -36,6 +36,14 @@ static std::string default_seeded_results_path(int numberOfBanks, int numberOfTh
          + "_" + std::to_string(numberOfThreads) + ".json";
 }
 
+static void print_usage(){
+    std::cerr << "Usage:\n"
+              << "  ./contagion benchmark\n"
+              << "  ./contagion seeded <number_of_banks> <number_of_threads> [seeds.json] [results.json] [--parallel-only]\n"
+              << "  ./contagion demo-random\n"
+              << "  ./contagion demo-extreme\n";
+}
+
 int main(int argc, char* argv[]){
     if(argc > 1 && std::string(argv[1]) == "benchmark"){
         std::cout<<"Running interbank contagion benchmark" << std::endl;
@@ -99,10 +107,14 @@ int main(int argc, char* argv[]){
         run_random_small_market_visualization();
         std::cout << "Demo finished" << std::endl;
     }
-    else{
+    else if(argc == 1 || (argc > 1 && std::string(argv[1]) == "demo-extreme")){
         std::cout << "Running extreme multi-quarter demo" << std::endl;
         run_extreme_small_market_visualization();
         std::cout << "Demo finished" << std::endl;
+    }
+    else{
+        print_usage();
+        return 1;
     }
 
     return 0;
