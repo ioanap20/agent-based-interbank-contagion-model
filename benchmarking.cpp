@@ -356,7 +356,8 @@ static void prepare_contagion_start(const std::vector<Bank>& baseBanks,
 void run_seeded_experiment(int numberOfBanks,
                            int numberOfThreads,
                            const std::string& seedsPath,
-                           const std::string& resultsPath){
+                           const std::string& resultsPath,
+                           bool runSequential){
     const std::vector<std::uint32_t> seeds = read_seed_file(seedsPath);
     write_seed_file(seedsPath, seeds);
     const std::vector<double> shockPercentages = {0.20, 0.40, 0.60, 0.80};
@@ -371,6 +372,7 @@ void run_seeded_experiment(int numberOfBanks,
     out << "{\n";
     out << "  \"number_of_banks\": " << numberOfBanks << ",\n";
     out << "  \"number_of_threads\": " << numberOfThreads << ",\n";
+    out << "  \"run_sequential\": " << (runSequential ? "true" : "false") << ",\n";
     out << "  \"timing_repeats\": " << timingRepeats << ",\n";
     out << "  \"seeds_file\": \"" << seedsPath << "\",\n";
     out << "  \"seeds\": [";
@@ -406,17 +408,21 @@ void run_seeded_experiment(int numberOfBanks,
                 cumulativeLoans
             );
 
-            std::vector<Bank> sequentialBanks = experimentStartBanks;
-            auto sequentialStart = std::chrono::high_resolution_clock::now();
-            for(int rep = 0; rep < timingRepeats; ++rep){
-                reset_banks_for_contagion(sequentialBanks, experimentStartBanks);
-                run_contagion(sequentialBanks, cumulativeLoans);
+            int sequentialDefaults = -1;
+            double sequentialTimeMs = 0.0;
+            if(runSequential){
+                std::vector<Bank> sequentialBanks = experimentStartBanks;
+                auto sequentialStart = std::chrono::high_resolution_clock::now();
+                for(int rep = 0; rep < timingRepeats; ++rep){
+                    reset_banks_for_contagion(sequentialBanks, experimentStartBanks);
+                    run_contagion(sequentialBanks, cumulativeLoans);
+                }
+                auto sequentialEnd = std::chrono::high_resolution_clock::now();
+                sequentialTimeMs = std::chrono::duration<double, std::milli>(
+                    sequentialEnd - sequentialStart
+                ).count();
+                sequentialDefaults = count_defaulted_banks(sequentialBanks);
             }
-            auto sequentialEnd = std::chrono::high_resolution_clock::now();
-            const double sequentialTimeMs = std::chrono::duration<double, std::milli>(
-                sequentialEnd - sequentialStart
-            ).count();
-            const int sequentialDefaults = count_defaulted_banks(sequentialBanks);
 
             std::vector<Bank> parallelBanks = experimentStartBanks;
             ParallelContagionPlan parallelPlan(numberOfBanks, cumulativeLoans, numberOfThreads);
@@ -430,7 +436,7 @@ void run_seeded_experiment(int numberOfBanks,
                 parallelEnd - parallelStart
             ).count();
             const int parallelDefaults = count_defaulted_banks(parallelBanks);
-            const double speedup = parallelTimeMs > 0.0 ? sequentialTimeMs / parallelTimeMs : 0.0;
+            const double speedup = runSequential && parallelTimeMs > 0.0 ? sequentialTimeMs / parallelTimeMs : 0.0;
 
             if(!firstResult){
                 out << ",\n";
@@ -443,12 +449,25 @@ void run_seeded_experiment(int numberOfBanks,
             out << "      \"shock_percentage\": " << std::fixed << std::setprecision(2) << shockPercentage << ",\n";
             out << "      \"effective_threads\": " << parallelPlan.thread_count() << ",\n";
             out << "      \"number_of_loans\": " << cumulativeLoans.size() << ",\n";
-            out << "      \"sequential_defaults\": " << sequentialDefaults << ",\n";
+            if(runSequential){
+                out << "      \"sequential_defaults\": " << sequentialDefaults << ",\n";
+            }else{
+                out << "      \"sequential_defaults\": null,\n";
+            }
             out << "      \"parallel_defaults\": " << parallelDefaults << ",\n";
-            out << "      \"sequential_time_ms\": " << std::fixed << std::setprecision(6) << sequentialTimeMs << ",\n";
+            if(runSequential){
+                out << "      \"sequential_time_ms\": " << std::fixed << std::setprecision(6) << sequentialTimeMs << ",\n";
+            }else{
+                out << "      \"sequential_time_ms\": null,\n";
+            }
             out << "      \"parallel_time_ms\": " << std::fixed << std::setprecision(6) << parallelTimeMs << ",\n";
-            out << "      \"speedup\": " << std::fixed << std::setprecision(6) << speedup << ",\n";
-            out << "      \"check\": \"" << (sequentialDefaults == parallelDefaults ? "OK" : "DIFF") << "\"\n";
+            if(runSequential){
+                out << "      \"speedup\": " << std::fixed << std::setprecision(6) << speedup << ",\n";
+                out << "      \"check\": \"" << (sequentialDefaults == parallelDefaults ? "OK" : "DIFF") << "\"\n";
+            }else{
+                out << "      \"speedup\": null,\n";
+                out << "      \"check\": \"SKIPPED\"\n";
+            }
             out << "    }";
         }
     }

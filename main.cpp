@@ -27,7 +27,8 @@ void run_benchmarking();
 void run_seeded_experiment(int numberOfBanks,
                            int numberOfThreads,
                            const std::string& seedsPath,
-                           const std::string& resultsPath);
+                           const std::string& resultsPath,
+                           bool runSequential);
 
 int main(int argc, char* argv[]){
     if(argc > 1 && std::string(argv[1]) == "benchmark"){
@@ -40,16 +41,36 @@ int main(int argc, char* argv[]){
     else if(argc > 3 && std::string(argv[1]) == "seeded"){
         int numberOfBanks = std::atoi(argv[2]);
         int numberOfThreads = std::atoi(argv[3]);
-        std::string seedsPath = argc > 4 ? argv[4] : "experiment_seeds.json";
-        std::string resultsPath = argc > 5 ? argv[5] : "seeded_results.json";
+        std::string seedsPath = "experiment_seeds.json";
+        std::string resultsPath = "seeded_results.json";
+        bool runSequential = true;
+        int pathCount = 0;
+
+        for(int i = 4; i < argc; ++i){
+            std::string arg = argv[i];
+            if(arg == "--parallel-only" || arg == "--no-sequential"){
+                runSequential = false;
+                continue;
+            }
+
+            if(pathCount == 0){
+                seedsPath = arg;
+            }else if(pathCount == 1){
+                resultsPath = arg;
+            }else{
+                std::cerr << "Usage: ./contagion seeded <number_of_banks> <number_of_threads> [seeds.json] [results.json] [--parallel-only]" << std::endl;
+                return 1;
+            }
+            pathCount++;
+        }
 
         if(numberOfBanks <= 0 || numberOfThreads <= 0){
-            std::cerr << "Usage: ./contagion seeded <number_of_banks> <number_of_threads> [seeds.json] [results.json]" << std::endl;
+            std::cerr << "Usage: ./contagion seeded <number_of_banks> <number_of_threads> [seeds.json] [results.json] [--parallel-only]" << std::endl;
             return 1;
         }
 
         std::cout << "Running seeded experiment" << std::endl;
-        run_seeded_experiment(numberOfBanks, numberOfThreads, seedsPath, resultsPath);
+        run_seeded_experiment(numberOfBanks, numberOfThreads, seedsPath, resultsPath, runSequential);
         std::cout << "Seeded experiment finished" << std::endl;
     }
     else if(argc > 1 && std::string(argv[1]) == "demo-random"){
